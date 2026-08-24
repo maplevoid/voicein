@@ -37,7 +37,13 @@ voicein status
 
 ## Niri
 
-登录自启 + 热键，加到 `~/.config/niri/config.kdl`：
+登录自启走用户 systemd（`~/.config/niri/config.kdl` 由 home-manager 管，当前不可写）：
+
+```bash
+systemctl --user enable --now voicein.service
+```
+
+热键需要写进 Niri 配置：
 
 ```kdl
 spawn-at-startup "voicein" "daemon"
@@ -49,6 +55,7 @@ binds {
 ```
 
 第二次 `toggle` 结束并转写。`cancel` 丢弃当前段，不注入。
+没有热键时也可以在终端跑 `voicein toggle` / `voicein cancel`。
 
 ## 失败反馈
 

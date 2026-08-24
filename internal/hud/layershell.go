@@ -47,8 +47,8 @@ func (s *LayerShell) Destroy() error {
 func (s *LayerShell) GetLayerSurface(surface *client.Surface, output client.Proxy, layer uint32, namespace string) (*LayerSurface, error) {
 	ls := NewLayerSurface(s.Context())
 	const opcode = 0
-	nsLen := client.PaddedLen(len(namespace) + 1)
-	n := 8 + 4 + 4 + 4 + 4 + nsLen
+	nsPad := client.PaddedLen(len(namespace) + 1)
+	n := 8 + 4 + 4 + 4 + 4 + 4 + nsPad
 	buf := make([]byte, n)
 	l := 0
 	client.PutUint32(buf[l:l+4], s.ID())

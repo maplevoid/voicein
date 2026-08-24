@@ -57,9 +57,6 @@ func (h *HUD) loop() error {
 	}
 	defer app.cleanup()
 
-	idle := time.NewTimer(time.Hour)
-	idle.Stop()
-
 	for {
 		select {
 		case <-h.stop:
@@ -72,19 +69,10 @@ func (h *HUD) loop() error {
 				if err := app.hide(); err != nil {
 					return err
 				}
-				idle.Stop()
 				continue
 			}
 			h.apply(l)
 			if err := app.redraw(); err != nil {
-				return err
-			}
-			idle.Reset(250 * time.Millisecond)
-		case <-idle.C:
-			h.mu.Lock()
-			h.show = false
-			h.mu.Unlock()
-			if err := app.hide(); err != nil {
 				return err
 			}
 		}
@@ -150,16 +138,25 @@ func (a *app) init() error {
 	if a.comp == nil || a.shm == nil || a.shell == nil {
 		return fmt.Errorf("compositor missing wl_compositor, wl_shm, or zwlr_layer_shell_v1")
 	}
+	return nil
+}
+
+func (a *app) mapSurface() error {
+	if a.surf != nil {
+		return nil
+	}
 	surf, err := a.comp.CreateSurface()
 	if err != nil {
 		return err
 	}
-	a.surf = surf
 	ls, err := a.shell.GetLayerSurface(surf, nil, a.layer, "voicein")
 	if err != nil {
+		_ = surf.Destroy()
 		return err
 	}
+	a.surf = surf
 	a.ls = ls
+	a.ready = false
 	ls.SetConfigureHandler(func(ev LayerSurfaceConfigureEvent) {
 		a.serial = ev.Serial
 		if ev.Width > 0 {
@@ -180,18 +177,47 @@ func (a *app) init() error {
 	if err := surf.Commit(); err != nil {
 		return err
 	}
-	return roundTrip(a.display)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for !a.ready && time.Now().Before(deadline) {
+		if err := a.display.Context().Dispatch(); err != nil {
+			return err
+		}
+	}
+	if !a.ready {
+		return fmt.Errorf("layer surface configure timeout")
+	}
+	return nil
+}
+
+func bindGlobal(reg *client.Registry, name uint32, iface string, version uint32, id client.Proxy) error {
+	const opcode = 0
+	ifacePad := client.PaddedLen(len(iface) + 1)
+	n := 8 + 4 + 4 + ifacePad + 4 + 4
+	buf := make([]byte, n)
+	l := 0
+	client.PutUint32(buf[l:l+4], reg.ID())
+	l += 4
+	client.PutUint32(buf[l:l+4], uint32(n<<16|opcode))
+	l += 4
+	client.PutUint32(buf[l:l+4], name)
+	l += 4
+	client.PutString(buf[l:l+(4+ifacePad)], iface, len(iface)+1)
+	l += 4 + ifacePad
+	client.PutUint32(buf[l:l+4], version)
+	l += 4
+	client.PutUint32(buf[l:l+4], id.ID())
+	return reg.Context().WriteMsg(buf, nil)
 }
 
 func (a *app) onGlobal(e client.RegistryGlobalEvent) {
 	switch e.Interface {
 	case "wl_compositor":
 		c := client.NewCompositor(a.display.Context())
-		_ = a.reg.Bind(e.Name, e.Interface, e.Version, c)
+		_ = bindGlobal(a.reg, e.Name, e.Interface, e.Version, c)
 		a.comp = c
 	case "wl_shm":
 		s := client.NewShm(a.display.Context())
-		_ = a.reg.Bind(e.Name, e.Interface, e.Version, s)
+		_ = bindGlobal(a.reg, e.Name, e.Interface, e.Version, s)
 		a.shm = s
 	case "zwlr_layer_shell_v1":
 		s := NewLayerShell(a.display.Context())
@@ -199,7 +225,7 @@ func (a *app) onGlobal(e client.RegistryGlobalEvent) {
 		if ver > 4 {
 			ver = 4
 		}
-		_ = a.reg.Bind(e.Name, e.Interface, ver, s)
+		_ = bindGlobal(a.reg, e.Name, e.Interface, ver, s)
 		a.shell = s
 	}
 }
@@ -263,8 +289,11 @@ func (a *app) releaseBuf() {
 }
 
 func (a *app) redraw() error {
-	if a.surf == nil || a.shm == nil || a.width <= 0 || a.height <= 0 {
+	if a.shm == nil || a.width <= 0 || a.height <= 0 {
 		return nil
+	}
+	if err := a.mapSurface(); err != nil {
+		return err
 	}
 	if err := a.ensureBuf(); err != nil {
 		return err
@@ -281,13 +310,17 @@ func (a *app) redraw() error {
 }
 
 func (a *app) hide() error {
-	if a.surf == nil {
-		return nil
+	a.releaseBuf()
+	if a.ls != nil {
+		_ = a.ls.Destroy()
+		a.ls = nil
 	}
-	if err := a.surf.Attach(nil, 0, 0); err != nil {
-		return err
+	if a.surf != nil {
+		_ = a.surf.Destroy()
+		a.surf = nil
 	}
-	return a.surf.Commit()
+	a.ready = false
+	return nil
 }
 
 func (a *app) cleanup() {
