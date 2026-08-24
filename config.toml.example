@@ -1,0 +1,33 @@
+# Copy to ~/.config/voicein/config.toml
+# Missing file uses built-in defaults.
+
+socket = ""                 # default: $XDG_RUNTIME_DIR/voicein.sock
+sample_rate = 16000
+silence = "8s"              # stop + transcribe after this much silence
+max_record = "60s"          # hard stop
+language = "auto"           # auto | zh | en | yue | ja | ko
+itn = true
+threads = 2
+notify = true               # notify-send/mako on failure only
+
+[model]
+dir = ""                    # default: $XDG_DATA_HOME/voicein/models
+onnx = "model.int8.onnx"
+tokens = "tokens.txt"
+vad = "silero_vad.onnx"
+
+[record]
+command = ["pw-record", "--rate", "16000", "--channels", "1", "--format", "s16", "--media-role", "Communication", "-"]
+
+[inject]
+copy = ["wl-copy", "--type", "text/plain;charset=utf-8"]
+paste = ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"]
+type = ["wtype", "-"]
+notify = ["notify-send", "-a", "voicein", "-u", "normal"]
+
+[hud]
+enabled = true
+width = 280
+height = 56
+margin = 28
+layer = "overlay"           # overlay | top
