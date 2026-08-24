@@ -16,12 +16,6 @@ type Deps struct {
 }
 
 func Run(args []string, d Deps) error {
-	if d.Load == nil {
-		d.Load = config.Load
-	}
-	if d.Call == nil {
-		d.Call = ipc.Call
-	}
 	if d.Stdout == nil {
 		d.Stdout = io.Discard
 	}
@@ -34,17 +28,17 @@ func Run(args []string, d Deps) error {
 		if d.Daemon == nil {
 			return fmt.Errorf("daemon not wired")
 		}
-		cfg, err := d.Load()
+		cfg, err := load(d)
 		if err != nil {
 			return err
 		}
 		return d.Daemon(cfg)
 	case "toggle", "cancel", "status", "quit":
-		cfg, err := d.Load()
+		cfg, err := load(d)
 		if err != nil {
 			return err
 		}
-		reply, err := d.Call(cfg.Socket, ipc.Command(cmd))
+		reply, err := call(d, cfg.Socket, ipc.Command(cmd))
 		if err != nil {
 			return fmt.Errorf("daemon not running (%s): %w", cfg.Socket, err)
 		}
@@ -65,6 +59,20 @@ func Run(args []string, d Deps) error {
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", cmd, Usage())
 	}
+}
+
+func load(d Deps) (config.Config, error) {
+	if d.Load != nil {
+		return d.Load()
+	}
+	return config.Load()
+}
+
+func call(d Deps, socket string, cmd ipc.Command) (ipc.Reply, error) {
+	if d.Call != nil {
+		return d.Call(socket, cmd)
+	}
+	return ipc.Call(socket, cmd)
 }
 
 func Usage() string {
