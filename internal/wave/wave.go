@@ -2,53 +2,31 @@ package wave
 
 import "math"
 
+const (
+	barCount = 7
+	barW     = 2
+	barGap   = 2
+)
+
 func Raster(w, hgt int, levels []float32, active bool) []byte {
 	pix := make([]byte, w*hgt*4)
-	n := len(levels)
-	if w < 2 || hgt < 2 || n == 0 {
+	if w < 2 || hgt < 2 {
 		return pix
 	}
 
-	const minBar, minGap = 2, 1
-	fit := (w + minGap) / (minBar + minGap)
-	if fit < 4 {
-		fit = 4
-	}
-	bars := n
-	if bars > fit {
-		bars = fit
-	}
-	if bars < 4 {
-		bars = n
-	}
-
-	gap := minGap
-	barW := (w - gap*(bars-1)) / bars
-	if barW < 1 {
-		barW = 1
-	}
-	used := bars*barW + (bars-1)*gap
+	used := barCount*barW + (barCount-1)*barGap
 	x0 := (w - used) / 2
 	if x0 < 0 {
 		x0 = 0
 	}
 
-	base := 1
-	maxH := hgt - 1
-	if maxH < 1 {
-		maxH = 1
-	}
-
-	for i := range bars {
-		amp := barAmp(levels, bars, i)
-		h := base + int(math.Round(amp*float64(maxH-base)))
-		if h < base {
-			h = base
+	for i := range barCount {
+		amp := sampleAmp(levels, i)
+		h := barHeight(hgt, amp)
+		if h <= 0 {
+			continue
 		}
-		if h > hgt {
-			h = hgt
-		}
-		x := x0 + i*(barW+gap)
+		x := x0 + i*(barW+barGap)
 		for y := hgt - h; y < hgt; y++ {
 			for dx := range barW {
 				px := x + dx
@@ -66,28 +44,38 @@ func Raster(w, hgt int, levels []float32, active bool) []byte {
 	return pix
 }
 
-func barAmp(levels []float32, bars, i int) float64 {
+func sampleAmp(levels []float32, i int) float64 {
 	n := len(levels)
-	start := i * n / bars
-	end := (i + 1) * n / bars
-	if end <= start {
-		end = start + 1
-	}
-	if end > n {
-		end = n
-	}
-	peak := 0.0
-	for _, v := range levels[start:end] {
-		a := math.Sqrt(float64(v)) * 8
-		if a > peak {
-			peak = a
-		}
-	}
-	if peak < 0.04 {
+	if n == 0 {
 		return 0
 	}
-	if peak > 1 {
+	idx := n - barCount + i
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= n {
+		idx = n - 1
+	}
+	a := math.Sqrt(float64(levels[idx])) * 9
+	if a < 0.07 {
+		return 0
+	}
+	if a > 1 {
 		return 1
 	}
-	return peak
+	return a
+}
+
+func barHeight(hgt int, amp float64) int {
+	if amp <= 0 {
+		return 1
+	}
+	h := 1 + int(math.Round(amp*float64(hgt-1)))
+	if h < 1 {
+		return 1
+	}
+	if h > hgt {
+		return hgt
+	}
+	return h
 }

@@ -18,7 +18,7 @@ import (
 func Start(cfg config.HUD) *HUD {
 	h := &HUD{
 		cfg:    cfg,
-		levels: make([]float32, 64),
+		levels: make([]float32, 8),
 		in:     make(chan Level, 16),
 		stop:   make(chan struct{}),
 		done:   make(chan struct{}),
@@ -86,7 +86,7 @@ func (h *HUD) apply(l Level) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if len(h.levels) == 0 {
-		h.levels = make([]float32, 64)
+		h.levels = make([]float32, 8)
 	}
 	copy(h.levels, h.levels[1:])
 	h.levels[len(h.levels)-1] = l.RMS
