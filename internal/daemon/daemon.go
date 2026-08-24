@@ -27,6 +27,7 @@ type Daemon struct {
 	err      string
 	text     string
 	started  time.Time
+	gen      uint64
 	cancel   context.CancelFunc
 	stop     chan struct{}
 	quit     chan struct{}
@@ -214,6 +215,7 @@ func (d *Daemon) transcribe(pcm []float32, recErr error) {
 		return
 	}
 	d.state = ipc.StateTranscribing
+	gen := d.gen
 	if d.cancel != nil {
 		d.cancel()
 		d.cancel = nil
@@ -221,30 +223,38 @@ func (d *Daemon) transcribe(pcm []float32, recErr error) {
 	d.mu.Unlock()
 
 	if recErr != nil {
-		d.setIdle(recErr.Error(), "")
+		d.finishIdle(gen, recErr.Error(), "")
 		inject.Notify(context.Background(), d.cfg, "voicein", recErr.Error())
 		return
 	}
 	if len(pcm) < d.cfg.SampleRate/5 {
-		d.setIdle("too short", "")
+		d.finishIdle(gen, "too short", "")
 		return
 	}
+	t0 := time.Now()
 	res, err := d.engine.Decode(pcm)
+	log.Printf("decode %d samples in %s: %v", len(pcm), time.Since(t0), err)
+	d.mu.Lock()
+	stale := d.gen != gen
+	d.mu.Unlock()
+	if stale {
+		return
+	}
 	if err != nil {
-		d.setIdle(err.Error(), "")
+		d.finishIdle(gen, err.Error(), "")
 		inject.Notify(context.Background(), d.cfg, "voicein", err.Error())
 		return
 	}
 	if res.Text == "" {
-		d.setIdle("empty transcript", "")
+		d.finishIdle(gen, "empty transcript", "")
 		return
 	}
 	if _, err := inject.Text(context.Background(), d.cfg, res.Text); err != nil {
-		d.setIdle(err.Error(), res.Text)
+		d.finishIdle(gen, err.Error(), res.Text)
 		inject.Notify(context.Background(), d.cfg, "voicein", "clipboard ok, inject failed: "+err.Error())
 		return
 	}
-	d.setIdle("", res.Text)
+	d.finishIdle(gen, "", res.Text)
 }
 
 func (d *Daemon) finishRec() {
@@ -276,6 +286,26 @@ func (d *Daemon) cancelRec() {
 
 func (d *Daemon) setIdle(errText, text string) {
 	d.mu.Lock()
+	d.gen++
+	if d.cancel != nil {
+		d.cancel()
+		d.cancel = nil
+	}
+	d.state = ipc.StateIdle
+	d.err = errText
+	if text != "" {
+		d.text = text
+	}
+	d.mu.Unlock()
+	d.hud.Hide()
+}
+
+func (d *Daemon) finishIdle(gen uint64, errText, text string) {
+	d.mu.Lock()
+	if d.gen != gen {
+		d.mu.Unlock()
+		return
+	}
 	if d.cancel != nil {
 		d.cancel()
 		d.cancel = nil
