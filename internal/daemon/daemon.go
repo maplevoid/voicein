@@ -286,6 +286,7 @@ func (d *Daemon) setIdle(errText, text string) {
 		d.text = text
 	}
 	d.mu.Unlock()
+	d.hud.Hide()
 }
 
 func (d *Daemon) snapshot() ipc.Status {

@@ -18,6 +18,7 @@ type Level struct {
 	RMS     float32
 	Active  bool
 	Seconds int
+	Hide    bool
 }
 
 type HUD struct {
@@ -67,6 +68,10 @@ func (h *HUD) Update(l Level) {
 	}
 }
 
+func (h *HUD) Hide() {
+	h.Update(Level{Hide: true})
+}
+
 func (h *HUD) Close() {
 	if !h.cfg.Enabled {
 		return
@@ -99,34 +104,40 @@ func (h *HUD) loop() error {
 	}
 	defer app.cleanup()
 
-	ticker := time.NewTicker(33 * time.Millisecond)
-	defer ticker.Stop()
-
-	ctx := display.Context()
-	fd, err := waylandFD(ctx)
-	if err != nil {
-		return err
-	}
+	idle := time.NewTimer(time.Hour)
+	idle.Stop()
 
 	for {
 		select {
 		case <-h.stop:
 			return nil
 		case l := <-h.in:
+			if l.Hide {
+				h.mu.Lock()
+				h.show = false
+				h.mu.Unlock()
+				if err := app.hide(); err != nil {
+					return err
+				}
+				idle.Stop()
+				continue
+			}
 			h.apply(l)
 			if err := app.redraw(); err != nil {
 				return err
 			}
-		case <-ticker.C:
-			if err := app.redraw(); err != nil {
+			idle.Reset(250 * time.Millisecond)
+		case <-idle.C:
+			h.mu.Lock()
+			h.show = false
+			h.mu.Unlock()
+			if err := app.hide(); err != nil {
 				return err
 			}
-		default:
 		}
-		if err := drainWayland(ctx, fd); err != nil {
+		if err := roundTrip(display); err != nil {
 			return err
 		}
-		time.Sleep(4 * time.Millisecond)
 	}
 }
 
@@ -141,6 +152,15 @@ func (h *HUD) apply(l Level) {
 	h.active = l.Active
 	h.secs = l.Seconds
 	h.show = true
+}
+
+type shmBuf struct {
+	file   *os.File
+	data   []byte
+	pool   *client.ShmPool
+	buf    *client.Buffer
+	w, h   int32
+	stride int32
 }
 
 type app struct {
@@ -158,6 +178,7 @@ type app struct {
 	layer   uint32
 	ready   bool
 	serial  uint32
+	mem     shmBuf
 }
 
 func (a *app) init() error {
@@ -196,7 +217,6 @@ func (a *app) init() error {
 		}
 		a.ready = true
 		_ = ls.AckConfigure(ev.Serial)
-		_ = a.redraw()
 	})
 	ls.SetClosedHandler(func() { a.ready = false })
 	_ = ls.SetSize(uint32(a.width), uint32(a.height))
@@ -231,44 +251,74 @@ func (a *app) onGlobal(e client.RegistryGlobalEvent) {
 	}
 }
 
-func (a *app) redraw() error {
-	if a.surf == nil || a.shm == nil || a.width <= 0 || a.height <= 0 {
+func (a *app) ensureBuf() error {
+	stride := a.width * 4
+	if a.mem.buf != nil && a.mem.w == a.width && a.mem.h == a.height {
 		return nil
 	}
-	pix := a.hud.raster(int(a.width), int(a.height))
-	stride := a.width * 4
+	a.releaseBuf()
 	size := int(stride * a.height)
-	f, err := os.CreateTemp(os.Getenv("XDG_RUNTIME_DIR"), "voicein-shm-*")
+	dir := os.Getenv("XDG_RUNTIME_DIR")
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	f, err := os.CreateTemp(dir, "voicein-shm-*")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 	_ = os.Remove(f.Name())
 	if err := f.Truncate(int64(size)); err != nil {
+		f.Close()
 		return err
 	}
 	data, err := unix.Mmap(int(f.Fd()), 0, size, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
+		f.Close()
 		return err
 	}
-	copy(data, pix)
 	pool, err := a.shm.CreatePool(int(f.Fd()), int32(size))
 	if err != nil {
 		_ = unix.Munmap(data)
+		f.Close()
 		return err
 	}
 	buf, err := pool.CreateBuffer(0, a.width, a.height, stride, uint32(client.ShmFormatArgb8888))
 	if err != nil {
 		_ = pool.Destroy()
 		_ = unix.Munmap(data)
+		f.Close()
 		return err
 	}
-	buf.SetReleaseHandler(func(_ client.BufferReleaseEvent) {
-		_ = buf.Destroy()
-		_ = pool.Destroy()
-		_ = unix.Munmap(data)
-	})
-	if err := a.surf.Attach(buf, 0, 0); err != nil {
+	a.mem = shmBuf{file: f, data: data, pool: pool, buf: buf, w: a.width, h: a.height, stride: stride}
+	return nil
+}
+
+func (a *app) releaseBuf() {
+	if a.mem.buf != nil {
+		_ = a.mem.buf.Destroy()
+	}
+	if a.mem.pool != nil {
+		_ = a.mem.pool.Destroy()
+	}
+	if a.mem.data != nil {
+		_ = unix.Munmap(a.mem.data)
+	}
+	if a.mem.file != nil {
+		_ = a.mem.file.Close()
+	}
+	a.mem = shmBuf{}
+}
+
+func (a *app) redraw() error {
+	if a.surf == nil || a.shm == nil || a.width <= 0 || a.height <= 0 {
+		return nil
+	}
+	if err := a.ensureBuf(); err != nil {
+		return err
+	}
+	pix := a.hud.raster(int(a.width), int(a.height))
+	copy(a.mem.data, pix)
+	if err := a.surf.Attach(a.mem.buf, 0, 0); err != nil {
 		return err
 	}
 	if err := a.surf.Damage(0, 0, a.width, a.height); err != nil {
@@ -277,7 +327,18 @@ func (a *app) redraw() error {
 	return a.surf.Commit()
 }
 
+func (a *app) hide() error {
+	if a.surf == nil {
+		return nil
+	}
+	if err := a.surf.Attach(nil, 0, 0); err != nil {
+		return err
+	}
+	return a.surf.Commit()
+}
+
 func (a *app) cleanup() {
+	a.releaseBuf()
 	if a.ls != nil {
 		_ = a.ls.Destroy()
 	}
@@ -304,19 +365,18 @@ func (h *HUD) raster(w, hgt int) []byte {
 	levels := append([]float32(nil), h.levels...)
 	active := h.active
 	h.mu.Unlock()
+	return raster(w, hgt, levels, active)
+}
 
+func raster(w, hgt int, levels []float32, active bool) []byte {
 	pix := make([]byte, w*hgt*4)
-	// Fully transparent outside the pill so exclusive-zone 0 never paints a box.
-	pillW := w
-	pillH := hgt
 	rx := float64(hgt) / 2
 	for y := range hgt {
 		for x := range w {
-			if !inPill(float64(x), float64(y), float64(pillW), float64(pillH), rx) {
+			if !inPill(float64(x), float64(y), float64(w), float64(hgt), rx) {
 				continue
 			}
 			i := (y*w + x) * 4
-			// ARGB8888 little-endian = B,G,R,A
 			pix[i+0] = 18
 			pix[i+1] = 16
 			pix[i+2] = 14
@@ -416,34 +476,4 @@ func roundTrip(d *client.Display) error {
 		}
 	}
 	return cb.Destroy()
-}
-
-func drainWayland(ctx *client.Context, fd int) error {
-	for {
-		var pfd unix.PollFd
-		pfd.Fd = int32(fd)
-		pfd.Events = unix.POLLIN
-		n, err := unix.Poll([]unix.PollFd{pfd}, 0)
-		if err != nil {
-			if err == unix.EINTR {
-				continue
-			}
-			return err
-		}
-		if n == 0 {
-			return nil
-		}
-		if err := ctx.Dispatch(); err != nil {
-			return err
-		}
-	}
-}
-
-func waylandFD(ctx *client.Context) (int, error) {
-	type fdder interface{ Fd() uintptr }
-	// go-wayland hides the unix conn. Peek via Display Sync is enough for
-	// correctness; for poll we recover the fd from the net.Conn if exposed.
-	// Fallback: Dispatch is nonblocking-ish after Sync; use a dummy poll skip.
-	_ = fdder(nil)
-	return -1, nil
 }
