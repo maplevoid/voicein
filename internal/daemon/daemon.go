@@ -314,4 +314,3 @@ func lastRMS(pcm []float32) float32 {
 	}
 	return audio.RMS(pcm[len(pcm)-n:])
 }
-
