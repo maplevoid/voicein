@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/BurntSushi/toml"
 )
 
 type Config struct {
@@ -120,7 +118,7 @@ func Load() (Config, error) {
 		}
 		return cfg, err
 	}
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	if err := applyTOML(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
 	}
 	if cfg.SampleRate <= 0 {
