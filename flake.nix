@@ -1,5 +1,5 @@
 {
-  description = "A Nix-flake-based Go development environment";
+  description = "voicein — Niri push-to-toggle speech-to-text";
 
   inputs.nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.1"; # unstable Nixpkgs
 
@@ -7,7 +7,7 @@
     { self, ... }@inputs:
 
     let
-      goVersion = 25; # Change this to update the whole stack
+      goVersion = 24; # Change this to update the whole stack
 
       supportedSystems = [
         "x86_64-linux"
@@ -35,19 +35,28 @@
       devShells = forEachSupportedSystem (
         { pkgs, system }:
         {
-          default = pkgs.mkShellNoCC {
+          default = pkgs.mkShell {
             packages = with pkgs; [
-              # go (version is specified by overlay)
               go
-
-              # goimports, godoc, etc.
               gotools
-
-              # https://github.com/golangci/golangci-lint
               golangci-lint
-
+              pkg-config
+              gcc
               self.formatter.${system}
+
+              # runtime tools used by tests and local smoke
+              pipewire
+              wl-clipboard
+              wtype
+              libnotify
             ];
+            nativeBuildInputs = with pkgs; [
+              pkg-config
+            ];
+            buildInputs = with pkgs; [
+              alsa-lib
+            ];
+            CGO_ENABLED = "1";
           };
         }
       );
