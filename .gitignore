@@ -1,0 +1,9 @@
+/result
+/bin
+/voicein
+*.onnx
+*.tar.bz2
+*.wav
+.vscode/
+.direnv/
+models/
