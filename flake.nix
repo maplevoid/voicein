@@ -42,9 +42,11 @@
               golangci-lint
               pkg-config
               gcc
+              stdenv.cc.cc.lib
               self.formatter.${system}
             ];
             CGO_ENABLED = "1";
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ];
           };
         }
       );
