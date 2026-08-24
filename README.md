@@ -9,7 +9,7 @@ Niri 上的常驻语音输入 daemon。按一次开始听，再按一次（或�
 - 登录就起 daemon，模型常驻
 - 文本：标点 + ITN；口令以后再加
 - 语言：Go
-- 反馈：底部居中小波形胶囊，exclusive-zone 0，不抢键盘，不抢焦点
+- 反馈：底部很小一条连续声浪，exclusive-zone 0，不抢键盘，不抢焦点
 - HUD 只在录音 / 转写时出现
 
 ## Quick start

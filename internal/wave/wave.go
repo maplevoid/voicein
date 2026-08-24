@@ -4,88 +4,76 @@ import "math"
 
 func Raster(w, hgt int, levels []float32, active bool) []byte {
 	pix := make([]byte, w*hgt*4)
-	rx := float64(hgt) / 2
-	for y := range hgt {
-		for x := range w {
-			if !InPill(float64(x), float64(y), float64(w), float64(hgt), rx) {
-				continue
-			}
-			i := (y*w + x) * 4
-			pix[i+0] = 18
-			pix[i+1] = 16
-			pix[i+2] = 14
-			pix[i+3] = 170
-		}
+	if w < 2 || hgt < 2 {
+		return pix
 	}
 
-	n := len(levels)
-	if n == 0 {
-		return pix
-	}
-	padX := 16
-	padY := 10
-	innerW := w - padX*2
-	innerH := hgt - padY*2
-	if innerW <= 0 || innerH <= 0 {
-		return pix
-	}
-	barW := float64(innerW) / float64(n)
-	fgB, fgG, fgR := byte(210), byte(220), byte(80)
+	fgB, fgG, fgR := byte(170), byte(190), byte(80)
 	if active {
-		fgB, fgG, fgR = 90, 210, 120
+		fgB, fgG, fgR = 70, 220, 130
 	}
-	mid := padY + innerH/2
-	for i, rms := range levels {
-		amp := math.Sqrt(float64(rms)) * float64(innerH)
-		if amp < 2 {
-			amp = 2
+
+	mid := float64(hgt) * 0.5
+	maxAmp := float64(hgt) * 0.36
+	if maxAmp < 2 {
+		maxAmp = 2
+	}
+
+	for x := range w {
+		t := 0.0
+		if w > 1 {
+			t = float64(x) / float64(w-1)
 		}
-		if amp > float64(innerH) {
-			amp = float64(innerH)
+		env := 0.0
+		if len(levels) > 0 {
+			env = math.Sqrt(interp(levels, t))
 		}
-		x0 := padX + int(float64(i)*barW)
-		x1 := padX + int(float64(i+1)*barW) - 1
-		if x1 <= x0 {
-			x1 = x0 + 1
+		gain := env * 7
+		if gain > 1 {
+			gain = 1
 		}
-		half := int(amp / 2)
-		y0 := mid - half
-		y1 := mid + half
-		for y := y0; y <= y1; y++ {
-			if y < 0 || y >= hgt {
+		amp := maxAmp * (0.16 + 0.84*gain)
+		phase := t*2*math.Pi*5 + env*2
+		shape := math.Sin(phase) + 0.3*math.Sin(phase*2+0.8)
+		if shape > 1 {
+			shape = 1
+		} else if shape < -1 {
+			shape = -1
+		}
+		yf := mid + amp*shape
+		for y := range hgt {
+			d := math.Abs(float64(y)+0.5 - yf)
+			if d >= 1.25 {
 				continue
 			}
-			for x := x0; x <= x1; x++ {
-				if x < 0 || x >= w {
-					continue
-				}
-				if !InPill(float64(x), float64(y), float64(w), float64(hgt), rx) {
-					continue
-				}
-				off := (y*w + x) * 4
-				pix[off+0] = fgB
-				pix[off+1] = fgG
-				pix[off+2] = fgR
-				pix[off+3] = 230
-			}
+			a := (1.25 - d) / 1.25
+			i := (y*w + x) * 4
+			pix[i+0] = fgB
+			pix[i+1] = fgG
+			pix[i+2] = fgR
+			pix[i+3] = byte(50 + a*180)
 		}
 	}
 	return pix
 }
 
-func InPill(x, y, w, h, r float64) bool {
-	if y < 0 || y >= h || x < 0 || x >= w {
-		return false
+func interp(levels []float32, t float64) float64 {
+	n := len(levels)
+	if n == 1 {
+		return float64(levels[0])
 	}
-	if x >= r && x < w-r {
-		return true
+	if t < 0 {
+		t = 0
 	}
-	cx := r
-	if x >= w-r {
-		cx = w - r
+	if t > 1 {
+		t = 1
 	}
-	cy := h / 2
-	dx := x - cx
-	dy := y - cy
-	return dx*dx+dy*dy <= r*r
+	x := t * float64(n-1)
+	i := int(x)
+	if i >= n-1 {
+		return float64(levels[n-1])
+	}
+	f := x - float64(i)
+	f = f * f * (3 - 2*f)
+	return float64(levels[i])*(1-f) + float64(levels[i+1])*f
 }

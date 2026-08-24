@@ -94,9 +94,9 @@ func Defaults() Config {
 		},
 		HUD: HUD{
 			Enabled: true,
-			Width:   280,
-			Height:  56,
-			Margin:  28,
+			Width:   96,
+			Height:  20,
+			Margin:  20,
 			Layer:   "overlay",
 		},
 	}
@@ -140,10 +140,10 @@ func Load() (Config, error) {
 		cfg.Threads = 2
 	}
 	if cfg.HUD.Width <= 0 {
-		cfg.HUD.Width = 280
+		cfg.HUD.Width = 96
 	}
 	if cfg.HUD.Height <= 0 {
-		cfg.HUD.Height = 56
+		cfg.HUD.Height = 20
 	}
 	if cfg.HUD.Layer == "" {
 		cfg.HUD.Layer = "overlay"
@@ -213,9 +213,9 @@ notify = ["notify-send", "-a", "voicein", "-u", "normal"]
 
 [hud]
 enabled = true
-width = 280
-height = 56
-margin = 28
+width = 96
+height = 20
+margin = 20
 layer = "overlay"           # overlay | top
 `) + "\n"
 }
