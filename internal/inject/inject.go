@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -25,22 +26,26 @@ func Text(ctx context.Context, cfg config.Config, text string) (Result, error) {
 	if timeout <= 0 {
 		timeout = 4 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 
-	if err := runStdin(ctx, cfg.Inject.Copy, text); err != nil {
+	if err := startStdin(cfg.Inject.Copy, text); err != nil {
 		return Result{}, fmt.Errorf("clipboard: %w", err)
 	}
 	res := Result{Copied: true, Method: "clipboard"}
 
 	if len(cfg.Inject.Paste) > 0 {
-		if err := run(ctx, cfg.Inject.Paste); err == nil {
+		pctx, cancel := context.WithTimeout(ctx, timeout)
+		err := run(pctx, cfg.Inject.Paste)
+		cancel()
+		if err == nil {
 			res.Method = "paste"
 			return res, nil
 		}
 	}
 	if len(cfg.Inject.Type) > 0 {
-		if err := runStdin(ctx, cfg.Inject.Type, text); err == nil {
+		tctx, cancel := context.WithTimeout(ctx, timeout)
+		err := runStdin(tctx, cfg.Inject.Type, text)
+		cancel()
+		if err == nil {
 			res.Method = "type"
 			return res, nil
 		}
@@ -84,4 +89,39 @@ func runStdin(ctx context.Context, argv []string, stdin string) error {
 		return fmt.Errorf("%s: %w (%s)", argv[0], err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
+}
+// startStdin writes stdin then returns. Commands that stay alive as a
+// clipboard owner (wl-copy) are detached; commands that exit after
+// consuming stdin are waited on briefly so tests can observe the write.
+func startStdin(argv []string, stdin string) error {
+	if len(argv) == 0 {
+		return fmt.Errorf("empty command")
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	pipe, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("%s: %w", argv[0], err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("%s: %w (%s)", argv[0], err, strings.TrimSpace(stderr.String()))
+	}
+	if _, err := io.WriteString(pipe, stdin); err != nil {
+		_ = pipe.Close()
+		_ = cmd.Process.Kill()
+		return fmt.Errorf("%s: %w", argv[0], err)
+	}
+	_ = pipe.Close()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("%s: %w (%s)", argv[0], err, strings.TrimSpace(stderr.String()))
+		}
+		return nil
+	case <-time.After(200 * time.Millisecond):
+		return nil
+	}
 }

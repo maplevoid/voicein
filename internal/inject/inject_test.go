@@ -64,6 +64,28 @@ func TestTextFallsBackToType(t *testing.T) {
 	}
 }
 
+func TestTextDoesNotWaitOnClipboardOwner(t *testing.T) {
+	dir := t.TempDir()
+	paste := filepath.Join(dir, "paste")
+	cfg := config.Defaults()
+	cfg.Inject.Timeout = time.Second
+	cfg.Inject.Copy = []string{"sh", "-c", "cat >/dev/null; sleep 30"}
+	cfg.Inject.Paste = []string{"sh", "-c", "echo pasted > " + paste}
+	cfg.Inject.Type = nil
+
+	start := time.Now()
+	res, err := Text(context.Background(), cfg, "hi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Method != "paste" {
+		t.Fatalf("method %s", res.Method)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("blocked on clipboard owner for %s", time.Since(start))
+	}
+}
+
 func TestTextRejectsEmpty(t *testing.T) {
 	_, err := Text(context.Background(), config.Defaults(), "   ")
 	if err == nil {
