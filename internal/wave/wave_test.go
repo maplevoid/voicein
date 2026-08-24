@@ -2,41 +2,61 @@ package wave
 
 import "testing"
 
-func TestRasterWaveIsThinAndInterior(t *testing.T) {
-	levels := make([]float32, 16)
-	for i := range levels {
-		levels[i] = 0.04
-	}
-	pix := Raster(80, 20, levels, true)
-	if len(pix) != 80*20*4 {
+func TestRasterQuietIsAlmostEmpty(t *testing.T) {
+	pix := Raster(72, 18, make([]float32, 12), false)
+	if len(pix) != 72*18*4 {
 		t.Fatalf("len %d", len(pix))
 	}
-	if pix[3] != 0 {
-		t.Fatalf("corner alpha %d", pix[3])
-	}
-	var lit int
-	for i := 3; i < len(pix); i += 4 {
-		if pix[i] > 0 {
+	var lit, top int
+	for y := 0; y < 18; y++ {
+		for x := 0; x < 72; x++ {
+			if pix[(y*72+x)*4+3] == 0 {
+				continue
+			}
 			lit++
+			if y < 16 {
+				top++
+			}
 		}
 	}
-	if lit < 80 {
-		t.Fatalf("wave too sparse %d", lit)
+	if lit == 0 {
+		t.Fatal("quiet bars missing")
 	}
-	if lit > 80*6 {
-		t.Fatalf("wave too thick %d", lit)
+	if top != 0 {
+		t.Fatalf("quiet bars too tall %d", top)
 	}
 }
 
-func TestRasterQuietStillDraws(t *testing.T) {
-	pix := Raster(64, 16, make([]float32, 8), false)
-	var lit int
-	for i := 3; i < len(pix); i += 4 {
-		if pix[i] > 0 {
-			lit++
+func TestRasterLoudBarsGrowUp(t *testing.T) {
+	levels := make([]float32, 12)
+	for i := range levels {
+		if i%2 == 0 {
+			levels[i] = 0.04
+		} else {
+			levels[i] = 0.002
 		}
 	}
-	if lit < 48 {
-		t.Fatalf("idle wave missing %d", lit)
+	pix := Raster(72, 18, levels, true)
+	var lit, top int
+	for y := 0; y < 18; y++ {
+		for x := 0; x < 72; x++ {
+			a := pix[(y*72+x)*4+3]
+			if a == 0 {
+				continue
+			}
+			if pix[(y*72+x)*4] != 255 || pix[(y*72+x)*4+1] != 255 || pix[(y*72+x)*4+2] != 255 {
+				t.Fatalf("bar not white at %d,%d", x, y)
+			}
+			lit++
+			if y < 8 {
+				top++
+			}
+		}
+	}
+	if lit < 40 {
+		t.Fatalf("loud bars too sparse %d", lit)
+	}
+	if top == 0 {
+		t.Fatal("loud bars did not rise")
 	}
 }

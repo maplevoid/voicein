@@ -4,76 +4,90 @@ import "math"
 
 func Raster(w, hgt int, levels []float32, active bool) []byte {
 	pix := make([]byte, w*hgt*4)
-	if w < 2 || hgt < 2 {
+	n := len(levels)
+	if w < 2 || hgt < 2 || n == 0 {
 		return pix
 	}
 
-	fgB, fgG, fgR := byte(170), byte(190), byte(80)
-	if active {
-		fgB, fgG, fgR = 70, 220, 130
+	const minBar, minGap = 2, 1
+	fit := (w + minGap) / (minBar + minGap)
+	if fit < 4 {
+		fit = 4
+	}
+	bars := n
+	if bars > fit {
+		bars = fit
+	}
+	if bars < 4 {
+		bars = n
 	}
 
-	mid := float64(hgt) * 0.5
-	maxAmp := float64(hgt) * 0.36
-	if maxAmp < 2 {
-		maxAmp = 2
+	gap := minGap
+	barW := (w - gap*(bars-1)) / bars
+	if barW < 1 {
+		barW = 1
+	}
+	used := bars*barW + (bars-1)*gap
+	x0 := (w - used) / 2
+	if x0 < 0 {
+		x0 = 0
 	}
 
-	for x := range w {
-		t := 0.0
-		if w > 1 {
-			t = float64(x) / float64(w-1)
+	base := 1
+	maxH := hgt - 1
+	if maxH < 1 {
+		maxH = 1
+	}
+
+	for i := range bars {
+		amp := barAmp(levels, bars, i)
+		h := base + int(math.Round(amp*float64(maxH-base)))
+		if h < base {
+			h = base
 		}
-		env := 0.0
-		if len(levels) > 0 {
-			env = math.Sqrt(interp(levels, t))
+		if h > hgt {
+			h = hgt
 		}
-		gain := env * 7
-		if gain > 1 {
-			gain = 1
-		}
-		amp := maxAmp * (0.16 + 0.84*gain)
-		phase := t*2*math.Pi*5 + env*2
-		shape := math.Sin(phase) + 0.3*math.Sin(phase*2+0.8)
-		if shape > 1 {
-			shape = 1
-		} else if shape < -1 {
-			shape = -1
-		}
-		yf := mid + amp*shape
-		for y := range hgt {
-			d := math.Abs(float64(y)+0.5 - yf)
-			if d >= 1.25 {
-				continue
+		x := x0 + i*(barW+gap)
+		for y := hgt - h; y < hgt; y++ {
+			for dx := range barW {
+				px := x + dx
+				if px < 0 || px >= w || y < 0 || y >= hgt {
+					continue
+				}
+				off := (y*w + px) * 4
+				pix[off+0] = 255
+				pix[off+1] = 255
+				pix[off+2] = 255
+				pix[off+3] = 235
 			}
-			a := (1.25 - d) / 1.25
-			i := (y*w + x) * 4
-			pix[i+0] = fgB
-			pix[i+1] = fgG
-			pix[i+2] = fgR
-			pix[i+3] = byte(50 + a*180)
 		}
 	}
 	return pix
 }
 
-func interp(levels []float32, t float64) float64 {
+func barAmp(levels []float32, bars, i int) float64 {
 	n := len(levels)
-	if n == 1 {
-		return float64(levels[0])
+	start := i * n / bars
+	end := (i + 1) * n / bars
+	if end <= start {
+		end = start + 1
 	}
-	if t < 0 {
-		t = 0
+	if end > n {
+		end = n
 	}
-	if t > 1 {
-		t = 1
+	peak := 0.0
+	for _, v := range levels[start:end] {
+		a := math.Sqrt(float64(v)) * 8
+		if a > peak {
+			peak = a
+		}
 	}
-	x := t * float64(n-1)
-	i := int(x)
-	if i >= n-1 {
-		return float64(levels[n-1])
+	if peak < 0.04 {
+		return 0
 	}
-	f := x - float64(i)
-	f = f * f * (3 - 2*f)
-	return float64(levels[i])*(1-f) + float64(levels[i+1])*f
+	if peak > 1 {
+		return 1
+	}
+	return peak
 }
