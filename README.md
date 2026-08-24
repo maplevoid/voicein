@@ -83,6 +83,17 @@ binds {
 注入看焦点窗口：Wayland 用 `wtype`，X11（`niri` 里 PID 是 `xwayland-satellite`）用 `xclip`/`xdotool`。
 文本始终先复制到对应剪贴板；粘贴失败再尝试逐字输入。
 
+NixOS / Home Manager 要把 X11 工具放进**用户环境**，不能只靠 `~/.local/bin` 临时 symlink。daemon 的 PATH 来自用户 systemd，登录后必须能直接找到 `xclip` 和 `xdotool`：
+
+```nix
+# home.packages / users/.shared/niri.nix
+wtype
+xclip
+xdotool
+```
+
+然后 `home-manager switch` / `ug`。不要把这两个二进制手链到 nix store 路径。
+
 开发：
 
 ```bash
