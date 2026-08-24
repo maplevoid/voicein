@@ -76,8 +76,12 @@ binds {
 
 - `pw-record`（pipewire）
 - `wl-copy`（wl-clipboard）
-- `wtype`
+- `wtype`（Wayland 窗口，如 Ghostty）
+- `xclip` + `xdotool`（XWayland 窗口，Flatpak QQ / 微信）
 - `notify-send`（libnotify / mako）
+
+注入看焦点窗口：Wayland 用 `wtype`，X11（`niri` 里 PID 是 `xwayland-satellite`）用 `xclip`/`xdotool`。
+文本始终先复制到对应剪贴板；粘贴失败再尝试逐字输入。
 
 开发：
 

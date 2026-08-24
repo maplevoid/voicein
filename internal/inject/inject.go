@@ -3,9 +3,12 @@ package inject
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,23 +30,24 @@ func Text(ctx context.Context, cfg config.Config, text string) (Result, error) {
 		timeout = 4 * time.Second
 	}
 
-	if err := startStdin(cfg.Inject.Copy, text); err != nil {
+	copyCmd, pasteCmd, typeCmd := route(cfg.Inject)
+	if err := startStdin(copyCmd, text); err != nil {
 		return Result{}, fmt.Errorf("clipboard: %w", err)
 	}
 	res := Result{Copied: true, Method: "clipboard"}
 
-	if len(cfg.Inject.Paste) > 0 {
+	if len(pasteCmd) > 0 {
 		pctx, cancel := context.WithTimeout(ctx, timeout)
-		err := run(pctx, cfg.Inject.Paste)
+		err := run(pctx, pasteCmd)
 		cancel()
 		if err == nil {
 			res.Method = "paste"
 			return res, nil
 		}
 	}
-	if len(cfg.Inject.Type) > 0 {
+	if len(typeCmd) > 0 {
 		tctx, cancel := context.WithTimeout(ctx, timeout)
-		err := runStdin(tctx, cfg.Inject.Type, text)
+		err := runStdin(tctx, typeCmd, text)
 		cancel()
 		if err == nil {
 			res.Method = "type"
@@ -51,6 +55,62 @@ func Text(ctx context.Context, cfg config.Config, text string) (Result, error) {
 		}
 	}
 	return res, fmt.Errorf("inject failed after clipboard copy")
+}
+
+func route(inj config.Inject) (copyCmd, pasteCmd, typeCmd []string) {
+	if focusedX11() && len(inj.XCopy)+len(inj.XPaste)+len(inj.XType) > 0 {
+		return inj.XCopy, inj.XPaste, inj.XType
+	}
+	return inj.Copy, inj.Paste, inj.Type
+}
+
+type niriWindow struct {
+	PID int `json:"pid"`
+}
+
+func focusedX11() bool {
+	look := lookupNiri
+	if look == nil {
+		look = niriFocusedPID
+	}
+	pid, ok := look()
+	if !ok || pid <= 0 {
+		return false
+	}
+	read := readComm
+	if read == nil {
+		read = procComm
+	}
+	name, err := read(pid)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(name), "xwayland")
+}
+
+var (
+	lookupNiri func() (int, bool)
+	readComm   func(int) (string, error)
+)
+
+func procComm(pid int) (string, error) {
+	name, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/comm")
+	if err != nil {
+		return "", err
+	}
+	return string(name), nil
+}
+
+func niriFocusedPID() (int, bool) {
+	out, err := exec.Command("niri", "msg", "-j", "focused-window").Output()
+	if err != nil {
+		return 0, false
+	}
+	var win niriWindow
+	if err := json.Unmarshal(out, &win); err != nil || win.PID <= 0 {
+		return 0, false
+	}
+	return win.PID, true
 }
 
 func Notify(ctx context.Context, cfg config.Config, title, body string) {

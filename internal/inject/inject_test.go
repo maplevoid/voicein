@@ -10,6 +10,11 @@ import (
 	"github.com/zway/voicein/internal/config"
 )
 
+func TestMain(m *testing.M) {
+	lookupNiri = func() (int, bool) { return 0, false }
+	os.Exit(m.Run())
+}
+
 func TestTextCopiesThenPastes(t *testing.T) {
 	dir := t.TempDir()
 	clip := filepath.Join(dir, "clip")
@@ -83,6 +88,53 @@ func TestTextDoesNotWaitOnClipboardOwner(t *testing.T) {
 	}
 	if time.Since(start) > 2*time.Second {
 		t.Fatalf("blocked on clipboard owner for %s", time.Since(start))
+	}
+}
+
+func TestTextUsesX11CommandsWhenFocusedX11(t *testing.T) {
+	dir := t.TempDir()
+	clip := filepath.Join(dir, "clip")
+	paste := filepath.Join(dir, "paste")
+	cfg := config.Defaults()
+	cfg.Inject.Timeout = time.Second
+	cfg.Inject.Copy = []string{"false"}
+	cfg.Inject.Paste = []string{"false"}
+	cfg.Inject.Type = nil
+	cfg.Inject.XCopy = []string{"sh", "-c", "cat > " + clip}
+	cfg.Inject.XPaste = []string{"sh", "-c", "echo pasted > " + paste}
+	cfg.Inject.XType = nil
+	lookupNiri = func() (int, bool) { return 2501, true }
+	readComm = func(int) (string, error) { return "xwayland-satellite\n", nil }
+	t.Cleanup(func() {
+		lookupNiri = nil
+		readComm = nil
+	})
+
+	res, err := Text(context.Background(), cfg, "qq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Method != "paste" {
+		t.Fatalf("method %s", res.Method)
+	}
+	body, err := os.ReadFile(clip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "qq" {
+		t.Fatalf("clipboard %q", body)
+	}
+}
+
+func TestFocusedX11MatchesSatelliteComm(t *testing.T) {
+	lookupNiri = func() (int, bool) { return 2501, true }
+	readComm = func(int) (string, error) { return ".xwayland-satel\n", nil }
+	t.Cleanup(func() {
+		lookupNiri = func() (int, bool) { return 0, false }
+		readComm = nil
+	})
+	if !focusedX11() {
+		t.Fatal("expected xwayland-satellite comm to route X11")
 	}
 }
 

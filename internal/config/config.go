@@ -39,6 +39,9 @@ type Inject struct {
 	Copy    []string `toml:"copy"`
 	Paste   []string `toml:"paste"`
 	Type    []string `toml:"type"`
+	XCopy   []string `toml:"x_copy"`
+	XPaste  []string `toml:"x_paste"`
+	XType   []string `toml:"x_type"`
 	Notify  []string `toml:"notify"`
 	Timeout time.Duration
 }
@@ -83,6 +86,9 @@ func Defaults() Config {
 			Copy:    []string{"wl-copy", "--type", "text/plain;charset=utf-8"},
 			Paste:   []string{"wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"},
 			Type:    []string{"wtype", "-"},
+			XCopy:   []string{"xclip", "-selection", "clipboard"},
+			XPaste:  []string{"xdotool", "key", "--clearmodifiers", "ctrl+v"},
+			XType:   []string{"xdotool", "type", "--clearmodifiers", "--file", "-"},
 			Notify:  []string{"notify-send", "-a", "voicein", "-u", "normal"},
 			Timeout: 4 * time.Second,
 		},
@@ -200,6 +206,9 @@ command = ["pw-record", "--rate", "16000", "--channels", "1", "--format", "s16",
 copy = ["wl-copy", "--type", "text/plain;charset=utf-8"]
 paste = ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"]
 type = ["wtype", "-"]
+x_copy = ["xclip", "-selection", "clipboard"]
+x_paste = ["xdotool", "key", "--clearmodifiers", "ctrl+v"]
+x_type = ["xdotool", "type", "--clearmodifiers", "--file", "-"]
 notify = ["notify-send", "-a", "voicein", "-u", "normal"]
 
 [hud]

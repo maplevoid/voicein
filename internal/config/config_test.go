@@ -38,13 +38,16 @@ language = "zh"
 itn = false
 threads = 4
 notify = false
-
 [hud]
 enabled = false
 width = 100
 height = 20
 margin = 4
 layer = "top"
+
+[inject]
+x_copy = ["xclip", "-selection", "clipboard"]
+x_paste = ["xdotool", "key", "ctrl+v"]
 `
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -63,6 +66,12 @@ layer = "top"
 	}
 	if cfg.HUD.Enabled || cfg.HUD.Layer != "top" || cfg.HUD.Width != 100 {
 		t.Fatalf("hud %+v", cfg.HUD)
+	}
+	if len(cfg.Inject.XCopy) != 3 || cfg.Inject.XCopy[0] != "xclip" {
+		t.Fatalf("x_copy %+v", cfg.Inject.XCopy)
+	}
+	if len(cfg.Inject.XPaste) != 3 || cfg.Inject.XPaste[0] != "xdotool" {
+		t.Fatalf("x_paste %+v", cfg.Inject.XPaste)
 	}
 }
 

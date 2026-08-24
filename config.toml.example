@@ -23,6 +23,9 @@ command = ["pw-record", "--rate", "16000", "--channels", "1", "--format", "s16",
 copy = ["wl-copy", "--type", "text/plain;charset=utf-8"]
 paste = ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"]
 type = ["wtype", "-"]
+x_copy = ["xclip", "-selection", "clipboard"]
+x_paste = ["xdotool", "key", "--clearmodifiers", "ctrl+v"]
+x_type = ["xdotool", "type", "--clearmodifiers", "--file", "-"]
 notify = ["notify-send", "-a", "voicein", "-u", "normal"]
 
 [hud]

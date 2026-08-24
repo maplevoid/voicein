@@ -105,7 +105,7 @@ func assign(cfg *Config, section, key, val string) error {
 		}
 	case "inject":
 		arr, err := parseStringArray(val)
-		if err != nil && (key == "copy" || key == "paste" || key == "type" || key == "notify") {
+		if err != nil && (key == "copy" || key == "paste" || key == "type" || key == "x_copy" || key == "x_paste" || key == "x_type" || key == "notify") {
 			return err
 		}
 		switch key {
@@ -115,6 +115,12 @@ func assign(cfg *Config, section, key, val string) error {
 			cfg.Inject.Paste = arr
 		case "type":
 			cfg.Inject.Type = arr
+		case "x_copy":
+			cfg.Inject.XCopy = arr
+		case "x_paste":
+			cfg.Inject.XPaste = arr
+		case "x_type":
+			cfg.Inject.XType = arr
 		case "notify":
 			cfg.Inject.Notify = arr
 		}
