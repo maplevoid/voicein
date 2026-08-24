@@ -7,7 +7,7 @@
     { self, ... }@inputs:
 
     let
-      goVersion = 24; # Change this to update the whole stack
+      goVersion = 25; # Change this to update the whole stack
 
       supportedSystems = [
         "x86_64-linux"
@@ -43,18 +43,6 @@
               pkg-config
               gcc
               self.formatter.${system}
-
-              # runtime tools used by tests and local smoke
-              pipewire
-              wl-clipboard
-              wtype
-              libnotify
-            ];
-            nativeBuildInputs = with pkgs; [
-              pkg-config
-            ];
-            buildInputs = with pkgs; [
-              alsa-lib
             ];
             CGO_ENABLED = "1";
           };
