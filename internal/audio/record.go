@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"os/exec"
 	"sync"
 )
@@ -110,4 +111,93 @@ func mean32(samples []float32) float64 {
 		sum += float64(s)
 	}
 	return sum / float64(len(samples))
+}
+
+// Bands is a one-shot wrapper around Bank for tests.
+func Bands(samples []float32, n int) []float32 {
+	b := NewBank(n, 16000)
+	return b.Push(samples)
+}
+
+// Bank is n constant-Q bandpass filters across the speech band.
+type Bank struct {
+	n  int
+	bp []biquad
+}
+
+type biquad struct {
+	b0, b1, b2, a1, a2 float64
+	z1, z2             float64
+}
+
+func NewBank(n, sampleRate int) *Bank {
+	if n <= 0 {
+		n = 1
+	}
+	if sampleRate <= 0 {
+		sampleRate = 16000
+	}
+	b := &Bank{n: n, bp: make([]biquad, n)}
+	const fMin, fMax = 180.0, 3800.0
+	for i := range n {
+		lo := fMin * math.Pow(fMax/fMin, float64(i)/float64(n))
+		hi := fMin * math.Pow(fMax/fMin, float64(i+1)/float64(n))
+		fc := math.Sqrt(lo * hi)
+		q := fc / (hi - lo)
+		if q < 1.2 {
+			q = 1.2
+		}
+		b.bp[i] = newBandpass(fc, q, float64(sampleRate))
+	}
+	return b
+}
+
+func newBandpass(fc, q, sr float64) biquad {
+	w0 := 2 * math.Pi * fc / sr
+	alpha := math.Sin(w0) / (2 * q)
+	a0 := 1 + alpha
+	return biquad{
+		b0: alpha / a0,
+		b1: 0,
+		b2: -alpha / a0,
+		a1: -2 * math.Cos(w0) / a0,
+		a2: (1 - alpha) / a0,
+	}
+}
+
+func (f *biquad) tick(x float64) float64 {
+	y := f.b0*x + f.z1
+	f.z1 = f.b1*x - f.a1*y + f.z2
+	f.z2 = f.b2*x - f.a2*y
+	return y
+}
+
+func (b *Bank) Push(samples []float32) []float32 {
+	if b == nil {
+		return nil
+	}
+	out := make([]float32, b.n)
+	if len(samples) == 0 {
+		return out
+	}
+	mean := mean32(samples)
+	const gain = 3.2
+	for i := range b.n {
+		var acc float64
+		f := &b.bp[i]
+		for _, x := range samples {
+			y := f.tick(float64(x) - mean)
+			if y < 0 {
+				acc -= y
+			} else {
+				acc += y
+			}
+		}
+		a := (acc / float64(len(samples))) * gain
+		if a > 1 {
+			a = 1
+		}
+		out[i] = float32(a)
+	}
+	return out
 }

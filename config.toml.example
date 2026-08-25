@@ -33,7 +33,7 @@ notify = ["notify-send", "-a", "voicein", "-u", "normal"]
 
 [hud]
 enabled = true
-width = 36
-height = 16
-margin = 20
+width = 77
+height = 36
+margin = 28
 layer = "overlay"           # overlay | top

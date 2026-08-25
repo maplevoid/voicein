@@ -16,6 +16,7 @@ import (
 	"github.com/zway/voicein/internal/hud"
 	"github.com/zway/voicein/internal/inject"
 	"github.com/zway/voicein/internal/ipc"
+	"github.com/zway/voicein/internal/wave"
 )
 
 type Daemon struct {
@@ -167,6 +168,8 @@ func (d *Daemon) recordLoop(ctx context.Context, rec *audio.Recorder) {
 		lastVoice   = time.Now()
 		heard       bool
 		speechFloor = float32(0.0004)
+		bank        = audio.NewBank(wave.BarCount, d.cfg.SampleRate)
+		bands       = make([]float32, wave.BarCount)
 	)
 	deadline := time.NewTimer(d.cfg.MaxRecord)
 	defer deadline.Stop()
@@ -196,6 +199,7 @@ func (d *Daemon) recordLoop(ctx context.Context, rec *audio.Recorder) {
 		case <-tick.C:
 			d.hud.Update(hud.Level{
 				RMS:     lastRMS(pcm),
+				Bands:   append([]float32(nil), bands...),
 				Active:  heard && time.Since(lastVoice) < 400*time.Millisecond,
 				Seconds: int(time.Since(d.started).Seconds()),
 			})
@@ -208,6 +212,7 @@ func (d *Daemon) recordLoop(ctx context.Context, rec *audio.Recorder) {
 			}
 			pcm = append(pcm, frame...)
 			rms := audio.RMS(frame)
+			bands = bank.Push(frame)
 			speech := rms >= speechFloor || d.ep.Push(frame)
 			if speech {
 				heard = true
@@ -215,6 +220,7 @@ func (d *Daemon) recordLoop(ctx context.Context, rec *audio.Recorder) {
 			}
 			d.hud.Update(hud.Level{
 				RMS:     rms,
+				Bands:   append([]float32(nil), bands...),
 				Active:  speech,
 				Seconds: int(time.Since(d.started).Seconds()),
 			})

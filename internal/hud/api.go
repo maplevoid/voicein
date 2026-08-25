@@ -8,6 +8,7 @@ import (
 
 type Level struct {
 	RMS     float32
+	Bands   []float32
 	Active  bool
 	Seconds int
 	Hide    bool
@@ -35,6 +36,14 @@ func (h *HUD) Update(l Level) {
 	select {
 	case h.in <- l:
 	default:
+		select {
+		case <-h.in:
+		default:
+		}
+		select {
+		case h.in <- l:
+		default:
+		}
 	}
 }
 

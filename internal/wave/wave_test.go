@@ -3,11 +3,12 @@ package wave
 import "testing"
 
 func TestRasterQuietIsShortBaseline(t *testing.T) {
-	pix := Raster(36, 16, make([]float32, 16), false)
-	minX, maxX, lit, tall := 36, -1, 0, 0
-	for y := 0; y < 16; y++ {
-		for x := 0; x < 36; x++ {
-			if pix[(y*36+x)*4+3] == 0 {
+	const w, h = 77, 36
+	pix := Raster(w, h, make([]float32, BarCount), false)
+	minX, maxX, lit, tall := w, -1, 0, 0
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if pix[(y*w+x)*4+3] == 0 {
 				continue
 			}
 			lit++
@@ -17,7 +18,7 @@ func TestRasterQuietIsShortBaseline(t *testing.T) {
 			if x > maxX {
 				maxX = x
 			}
-			if y < 15 {
+			if y < h-3 {
 				tall++
 			}
 		}
@@ -28,18 +29,25 @@ func TestRasterQuietIsShortBaseline(t *testing.T) {
 	if tall != 0 {
 		t.Fatalf("quiet bars too tall %d", tall)
 	}
-	if maxX-minX > 28 {
-		t.Fatalf("quiet span too wide %d-%d", minX, maxX)
+	if maxX-minX < w-8 || maxX-minX > w {
+		t.Fatalf("quiet span %d-%d", minX, maxX)
 	}
 }
 
 func TestRasterLoudBarsBounceAndStayShort(t *testing.T) {
-	levels := []float32{0, 0, 0, 0, 0, 0, 0, 0, 0.05, 0.002, 0.03, 0.008, 0.04, 0.001, 0.02}
-	pix := Raster(36, 16, levels, true)
-	minX, maxX, lit, top := 36, -1, 0, 0
-	for y := 0; y < 16; y++ {
-		for x := 0; x < 36; x++ {
-			off := (y*36 + x) * 4
+	const w, h = 77, 36
+	levels := make([]float32, BarCount)
+	for i := range levels {
+		levels[i] = 0.12 + 0.75*float32(i%7)/6
+	}
+	pix := Raster(w, h, levels, true)
+	minX, maxX, lit, top := w, -1, 0, 0
+	n := displayBars(w)
+	x0 := (w - (n*barW + (n-1)*barGap)) / 2
+	heights := make([]int, 0, 8)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			off := (y*w + x) * 4
 			if pix[off+3] == 0 {
 				continue
 			}
@@ -53,18 +61,39 @@ func TestRasterLoudBarsBounceAndStayShort(t *testing.T) {
 			if x > maxX {
 				maxX = x
 			}
-			if y < 8 {
+			if y < h/2 {
 				top++
 			}
 		}
 	}
-	if lit < 20 {
+	for i := 0; i < n; i += n / 7 {
+		x := x0 + i*(barW+barGap)
+		topY := h
+		for y := 0; y < h; y++ {
+			if pix[(y*w+x)*4+3] != 0 {
+				topY = y
+				break
+			}
+		}
+		heights = append(heights, h-topY)
+	}
+	uniq := map[int]struct{}{}
+	for _, ht := range heights {
+		uniq[ht] = struct{}{}
+		if ht >= h {
+			t.Fatalf("bar full height %v", heights)
+		}
+	}
+	if lit < 400 {
 		t.Fatalf("loud bars too sparse %d", lit)
 	}
 	if top == 0 {
 		t.Fatal("loud bars did not rise")
 	}
-	if maxX-minX > 28 {
-		t.Fatalf("loud span too wide %d-%d", minX, maxX)
+	if len(uniq) < 3 {
+		t.Fatalf("bars did not vary %v", heights)
+	}
+	if maxX-minX < w-8 || maxX-minX > w {
+		t.Fatalf("loud span %d-%d", minX, maxX)
 	}
 }

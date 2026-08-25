@@ -18,7 +18,7 @@ import (
 func Start(cfg config.HUD) *HUD {
 	h := &HUD{
 		cfg:    cfg,
-		levels: make([]float32, 8),
+		levels: make([]float32, wave.BarCount),
 		in:     make(chan Level, 16),
 		stop:   make(chan struct{}),
 		done:   make(chan struct{}),
@@ -55,6 +55,7 @@ func (h *HUD) loop() error {
 	if err := app.init(); err != nil {
 		return err
 	}
+	log.Printf("hud: wayland ready %dx%d layer=%s", app.width, app.height, h.cfg.Layer)
 	defer app.cleanup()
 
 	for {
@@ -63,9 +64,7 @@ func (h *HUD) loop() error {
 			return nil
 		case l := <-h.in:
 			if l.Hide {
-				h.mu.Lock()
-				h.show = false
-				h.mu.Unlock()
+				h.apply(l)
 				if err := app.hide(); err != nil {
 					return err
 				}
@@ -85,11 +84,14 @@ func (h *HUD) loop() error {
 func (h *HUD) apply(l Level) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if len(h.levels) == 0 {
-		h.levels = make([]float32, 8)
+	if len(h.levels) != wave.BarCount {
+		h.levels = make([]float32, wave.BarCount)
 	}
-	copy(h.levels, h.levels[1:])
-	h.levels[len(h.levels)-1] = l.RMS
+	if l.Hide {
+		h.show = false
+		return
+	}
+	h.levels = mixBars(h.levels, l.RMS, l.Bands)
 	h.active = l.Active
 	h.secs = l.Seconds
 	h.show = true
@@ -102,6 +104,7 @@ type shmBuf struct {
 	buf    *client.Buffer
 	w, h   int32
 	stride int32
+	busy   bool
 }
 
 type app struct {
@@ -119,7 +122,8 @@ type app struct {
 	layer   uint32
 	ready   bool
 	serial  uint32
-	mem     shmBuf
+	bufs    [2]shmBuf
+	cur     int
 }
 
 func (a *app) init() error {
@@ -159,12 +163,8 @@ func (a *app) mapSurface() error {
 	a.ready = false
 	ls.SetConfigureHandler(func(ev LayerSurfaceConfigureEvent) {
 		a.serial = ev.Serial
-		if ev.Width > 0 {
-			a.width = int32(ev.Width)
-		}
-		if ev.Height > 0 {
-			a.height = int32(ev.Height)
-		}
+		// Keep the requested box. A 0x0 configure means "use our size";
+		// a stretched configure would hide a 160x48 HUD in a full-width strip.
 		a.ready = true
 		_ = ls.AckConfigure(ev.Serial)
 	})
@@ -230,12 +230,13 @@ func (a *app) onGlobal(e client.RegistryGlobalEvent) {
 	}
 }
 
-func (a *app) ensureBuf() error {
+func (a *app) ensureBuf(i int) error {
+	mem := &a.bufs[i]
 	stride := a.width * 4
-	if a.mem.buf != nil && a.mem.w == a.width && a.mem.h == a.height {
+	if mem.buf != nil && mem.w == a.width && mem.h == a.height {
 		return nil
 	}
-	a.releaseBuf()
+	releaseOne(mem)
 	size := int(stride * a.height)
 	dir := os.Getenv("XDG_RUNTIME_DIR")
 	if dir == "" {
@@ -268,24 +269,34 @@ func (a *app) ensureBuf() error {
 		f.Close()
 		return err
 	}
-	a.mem = shmBuf{file: f, data: data, pool: pool, buf: buf, w: a.width, h: a.height, stride: stride}
+	idx := i
+	buf.SetReleaseHandler(func(_ client.BufferReleaseEvent) {
+		a.bufs[idx].busy = false
+	})
+	*mem = shmBuf{file: f, data: data, pool: pool, buf: buf, w: a.width, h: a.height, stride: stride}
 	return nil
 }
 
+func releaseOne(mem *shmBuf) {
+	if mem.buf != nil {
+		_ = mem.buf.Destroy()
+	}
+	if mem.pool != nil {
+		_ = mem.pool.Destroy()
+	}
+	if mem.data != nil {
+		_ = syscall.Munmap(mem.data)
+	}
+	if mem.file != nil {
+		_ = mem.file.Close()
+	}
+	*mem = shmBuf{}
+}
+
 func (a *app) releaseBuf() {
-	if a.mem.buf != nil {
-		_ = a.mem.buf.Destroy()
-	}
-	if a.mem.pool != nil {
-		_ = a.mem.pool.Destroy()
-	}
-	if a.mem.data != nil {
-		_ = syscall.Munmap(a.mem.data)
-	}
-	if a.mem.file != nil {
-		_ = a.mem.file.Close()
-	}
-	a.mem = shmBuf{}
+	releaseOne(&a.bufs[0])
+	releaseOne(&a.bufs[1])
+	a.cur = 0
 }
 
 func (a *app) redraw() error {
@@ -295,17 +306,32 @@ func (a *app) redraw() error {
 	if err := a.mapSurface(); err != nil {
 		return err
 	}
-	if err := a.ensureBuf(); err != nil {
+	next := 1 - a.cur
+	if err := a.ensureBuf(next); err != nil {
 		return err
 	}
+	mem := &a.bufs[next]
+	if mem.busy {
+		if err := a.ensureBuf(a.cur); err != nil {
+			return err
+		}
+		if !a.bufs[a.cur].busy {
+			next = a.cur
+			mem = &a.bufs[next]
+		} else {
+			return nil
+		}
+	}
 	pix := a.hud.raster(int(a.width), int(a.height))
-	copy(a.mem.data, pix)
-	if err := a.surf.Attach(a.mem.buf, 0, 0); err != nil {
+	copy(mem.data, pix)
+	if err := a.surf.Attach(mem.buf, 0, 0); err != nil {
 		return err
 	}
 	if err := a.surf.Damage(0, 0, a.width, a.height); err != nil {
 		return err
 	}
+	mem.busy = true
+	a.cur = next
 	return a.surf.Commit()
 }
 
