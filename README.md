@@ -1,58 +1,64 @@
 # voicein
 
-Niri 上的常驻语音输入 daemon。按一次开始听，再按一次（或满 60 秒）转写，注入当前焦点窗口。思考停顿不会自动结束。
+Push-to-toggle speech-to-text for [Niri](https://github.com/YaLTeR/niri).
+Press once to start listening, press again (or hit 60s) to transcribe into
+the focused window. Thinking pauses do not end the take.
 
-- 无窗口 daemon，不是 TUI，也不是 Tauri
-- 引擎默认 SenseVoiceSmall；可切 [Whisper](https://github.com/k2-fsa/sherpa-onnx) small，CPU，官方 Go 绑定
-- 松手后再转。程序只暴露 `toggle` / `cancel` / `status`
-- 注入当前焦点窗口。失败留剪贴板
-- 登录就起 daemon，模型常驻
-- 文本：标点 + ITN；口令以后再加
-- 语言：Go
-- 反馈：底部正中一排细白竖条，1px 宽 1px 缝铺满 77px，静音一条淡基线，说话才按频段起伏
-- HUD 只在录音 / 转写时出现
+- Headless daemon. Not a TUI, not a window.
+- Default engine: [SenseVoiceSmall](https://github.com/k2-fsa/sherpa-onnx) int8 on CPU. Whisper small is optional.
+- Commands: `toggle` / `cancel` / `status` / `quit`.
+- Injects into the focused window. Paste failure leaves the text on the clipboard.
+- Models stay in `$XDG_DATA_HOME/voicein/models`. They are never copied into the Nix store.
+- HUD is a 77px row of 1px bars at the bottom center. Silent = one faint baseline. Speech moves the bands. Visible only while recording or transcribing.
 
-## Install
-
-模型自己放，不进 Nix store。
-
-```bash
-mkdir -p ~/.local/share/voicein/models
-# SenseVoiceSmall int8 + tokens.txt + silero_vad.onnx
-# 或 Whisper small: small-encoder.int8.onnx + small-decoder.int8.onnx + small-tokens.txt
-# https://github.com/k2-fsa/sherpa-onnx/releases
-```
-
-一次性跑：
-
-```bash
-nix run github:maplevoid/voicein -- daemon
-```
-
-Home Manager / NixOS 用户模块：
+## Install (Home Manager)
 
 ```nix
 {
   inputs.voicein.url = "github:maplevoid/voicein";
 
-  # home-manager.users.<name>.imports 或 standalone home.nix
-  imports = [ inputs.voicein.homeManagerModules.default ];
+  # NixOS + home-manager as a NixOS module:
+  home-manager.users.<name>.imports = [
+    inputs.voicein.homeManagerModules.default
+  ];
+
+  # or a standalone home.nix:
+  # imports = [ inputs.voicein.homeManagerModules.default ];
 
   services.voicein.enable = true;
 }
 ```
 
-`enable` 会把包放进用户环境，并挂上 `graphical-session.target` 的 user unit。`pw-record` 和 `niri` 用系统里已有的，不要跟着这个 flake 再编一份。
+`enable` puts `voicein` on `PATH` and starts a user unit on
+`graphical-session.target`. The package wraps `wl-copy`, `wtype`, `xclip`,
+`xdotool`, and `notify-send`. Use the host's `pw-record` and `niri`; do not
+rebuild those from this flake.
 
-可选配置：
+Models are still manual:
 
 ```bash
+mkdir -p ~/.local/share/voicein/models
+# SenseVoiceSmall int8 + tokens.txt + silero_vad.onnx
+# or Whisper small: small-encoder.int8.onnx + small-decoder.int8.onnx + small-tokens.txt
+# https://github.com/k2-fsa/sherpa-onnx/releases
+```
+
+One-shot without Home Manager:
+
+```bash
+nix run github:maplevoid/voicein -- daemon
+```
+
+Print a starter config (optional; missing file uses built-in defaults):
+
+```bash
+mkdir -p ~/.config/voicein
 nix run github:maplevoid/voicein -- config > ~/.config/voicein/config.toml
 ```
 
 ## Niri
 
-热键自己写：
+The module does not bind keys. Add them yourself:
 
 ```kdl
 binds {
@@ -61,40 +67,61 @@ binds {
 }
 ```
 
-第二次 `toggle` 结束并转写。`cancel` 丢弃当前段，不注入。没有热键也可以在终端跑同样的命令。
+Second `toggle` stops and transcribes. `cancel` drops the take. The same
+commands work from a terminal.
 
-## 失败反馈
+## Failure feedback
 
-- 只有波形。失败就波形变红一下，不弹通知
-- 注入失败：文本留剪贴板，`notify-send` 一声（可用 `notify = false` 关掉）
+- Decode / record failure: HUD flashes red. No notification.
+- Inject failure: text stays on the clipboard; `notify-send` once. Set `notify = false` to silence that.
 
-## 模型
+## Models
 
-放到 `$XDG_DATA_HOME/voicein/models`（默认 `~/.local/share/voicein/models`）：
+Default directory: `$XDG_DATA_HOME/voicein/models` (`~/.local/share/voicein/models`).
 
-- SenseVoice：`model.int8.onnx` + `tokens.txt`
-- Whisper：`small-encoder.int8.onnx` + `small-decoder.int8.onnx` + `small-tokens.txt`
-- `silero_vad.onnx` — HUD 说话检测；解码用整段（只裁首尾静音），结束靠第二次按键
+| Engine | Files |
+| --- | --- |
+| SenseVoice (default) | `model.int8.onnx`, `tokens.txt` |
+| Whisper | `small-encoder.int8.onnx`, `small-decoder.int8.onnx`, `small-tokens.txt` |
+| HUD VAD | `silero_vad.onnx` |
 
-默认 SenseVoice，第二次按完大约 0.3s 出字。中英夹杂再改 `engine = "whisper"` 并填 encoder/decoder/tokens。Whisper 大约慢 4 倍。
+SenseVoice is ~0.3s after the second press. Mixed Chinese/English: set
+`engine = "whisper"` and fill encoder/decoder/tokens. Whisper is about 4× slower.
 
-## 依赖
+VAD is only for the HUD. Decode uses the whole take (leading/trailing silence
+trimmed). Stop is always the second keypress or `max_record`.
 
-包已经 wrap 了这些命令：
+## Config
 
-- `wl-copy`（wl-clipboard）
-- `wtype`（Wayland 窗口，如 Ghostty）
-- `xclip` + `xdotool`（XWayland 窗口，Flatpak QQ / 微信）
-- `notify-send`（libnotify / mako）
+`$XDG_CONFIG_HOME/voicein/config.toml`. Empty / missing file = defaults.
 
-还需要系统里已有的：
+```toml
+socket = ""                 # default: $XDG_RUNTIME_DIR/voicein.sock
+sample_rate = 16000
+max_record = "60s"
+language = "auto"           # auto | zh | en | yue | ja | ko
+itn = true
+threads = 4
+notify = true
 
-- `pw-record`（PipeWire）
-- `niri`（探测焦点窗口是不是 XWayland）
+[model]
+dir = ""                    # default: $XDG_DATA_HOME/voicein/models
+engine = "sensevoice"       # sensevoice | whisper
+onnx = "model.int8.onnx"
+tokens = "tokens.txt"
+vad = "silero_vad.onnx"
+```
 
-注入看焦点窗口：Wayland 用 `wtype`，X11（`niri` 里 PID 是 `xwayland-satellite`）用 `xclip`/`xdotool`。文本始终先复制到对应剪贴板；粘贴失败再尝试逐字输入。
+## Inject
 
-## 开发
+Focus decides the path:
+
+- Wayland window (`wtype`): copy, then Ctrl+V; fallback is type-from-stdin.
+- XWayland (`niri` focused PID is `xwayland-satellite`): `xclip` + `xdotool`.
+
+Text is always copied first.
+
+## Develop
 
 ```bash
 nix develop
