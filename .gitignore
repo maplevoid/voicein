@@ -1,9 +1,17 @@
+# Nix / direnv
 /result
+/result-*
+.direnv/
+
+# Local build output
 /bin
 /voicein
+
+# Models and fixtures
 *.onnx
 *.tar.bz2
 *.wav
-.vscode/
-.direnv/
 models/
+
+# Editor
+.vscode/
