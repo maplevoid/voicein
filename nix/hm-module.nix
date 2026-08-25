@@ -25,6 +25,10 @@ in
   config = lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
 
+    home.activation.ensureVoiceinModels = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      $DRY_RUN_CMD ${pkgs.coreutils}/bin/mkdir -p "$HOME/.local/share/voicein/models"
+    '';
+
     systemd.user.services.voicein = {
       Unit = {
         Description = "voicein speech-to-text daemon";

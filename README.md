@@ -1,64 +1,122 @@
 # voicein
 
-Push-to-toggle speech-to-text for [Niri](https://github.com/YaLTeR/niri).
-Press once to start listening, press again (or hit 60s) to transcribe into
-the focused window. Thinking pauses do not end the take.
+Push-to-toggle speech-to-text for [Niri](https://github.com/YaLTeR/niri) on
+Linux. Press once to start listening, press again (or hit 60s) to transcribe
+into the focused window. Thinking pauses do not end the take.
 
 - Headless daemon. Not a TUI, not a window.
 - Default engine: [SenseVoiceSmall](https://github.com/k2-fsa/sherpa-onnx) int8 on CPU. Whisper small is optional.
-- Commands: `toggle` / `cancel` / `status` / `quit`.
+- Commands: `daemon` / `toggle` / `cancel` / `status` / `quit` / `config`.
 - Injects into the focused window. Paste failure leaves the text on the clipboard.
 - Models stay in `$XDG_DATA_HOME/voicein/models`. They are never copied into the Nix store.
 - HUD is a 77px row of 1px bars at the bottom center. Silent = one faint baseline. Speech moves the bands. Visible only while recording or transcribing.
 
-## Install (Home Manager)
+Linux only (`x86_64` / `aarch64`). Needs [Niri](https://github.com/YaLTeR/niri)
+and PipeWire (`pw-record`).
+
+## 1. Models
+
+Models are not part of the package. Put them here before starting the daemon:
+
+```text
+~/.local/share/voicein/models/
+```
+
+SenseVoice (default, ~229MB) plus Silero VAD (~0.6MB):
+
+```bash
+mkdir -p ~/.local/share/voicein/models
+cd /tmp
+
+curl -L -o sensevoice.tar.bz2 \
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
+tar xf sensevoice.tar.bz2
+cp sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/model.int8.onnx \
+   sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/tokens.txt \
+   ~/.local/share/voicein/models/
+
+curl -L -o ~/.local/share/voicein/models/silero_vad.onnx \
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
+```
+
+VAD is only for the HUD. Missing `silero_vad.onnx` still starts the daemon
+(energy-gate fallback). Missing `model.int8.onnx` or `tokens.txt` does not.
+
+Optional Whisper small (~360MB). Copy the int8 files as-is:
+
+```bash
+curl -L -o whisper.tar.bz2 \
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.tar.bz2
+tar xf whisper.tar.bz2
+cp sherpa-onnx-whisper-small/small-encoder.int8.onnx ~/.local/share/voicein/models/
+cp sherpa-onnx-whisper-small/small-decoder.int8.onnx ~/.local/share/voicein/models/
+cp sherpa-onnx-whisper-small/small-tokens.txt        ~/.local/share/voicein/models/
+```
+
+Then in `~/.config/voicein/config.toml`:
+
+```toml
+[model]
+engine = "whisper"
+encoder = "small-encoder.int8.onnx"
+decoder = "small-decoder.int8.onnx"
+tokens = "small-tokens.txt"
+```
+
+Whisper is about 4× slower than SenseVoice.
+
+## 2. Install
+
+### Home Manager on NixOS
 
 ```nix
 {
-  inputs.voicein.url = "git+ssh://git@github.com/maplevoid/voicein.git";
+  inputs.voicein.url = "github:maplevoid/voicein";
 
-  # NixOS + home-manager as a NixOS module:
+  # inside nixosSystem { modules = [ ... ]; }
   home-manager.users.<name>.imports = [
     inputs.voicein.homeManagerModules.default
   ];
+  home-manager.users.<name>.services.voicein.enable = true;
+}
+```
 
-  # or a standalone home.nix:
-  # imports = [ inputs.voicein.homeManagerModules.default ];
+### Standalone `home.nix`
 
+```nix
+{
+  inputs,
+  ...
+}: {
+  imports = [ inputs.voicein.homeManagerModules.default ];
   services.voicein.enable = true;
 }
 ```
 
-`enable` puts `voicein` on `PATH` and starts a user unit on
+`enable` puts `voicein` on `PATH`, creates
+`~/.local/share/voicein/models`, and starts a user unit on
 `graphical-session.target`. The package wraps `wl-copy`, `wtype`, `xclip`,
 `xdotool`, and `notify-send`. Use the host's `pw-record` and `niri`; do not
 rebuild those from this flake.
 
-Models are still manual:
+After `home-manager switch` / `nixos-rebuild switch`, if this graphical
+session was already running:
 
 ```bash
-mkdir -p ~/.local/share/voicein/models
-# SenseVoiceSmall int8 + tokens.txt + silero_vad.onnx
-# or Whisper small: small-encoder.int8.onnx + small-decoder.int8.onnx + small-tokens.txt
-# https://github.com/k2-fsa/sherpa-onnx/releases
+systemctl --user daemon-reload
+systemctl --user start voicein
+voicein status   # idle
 ```
 
-One-shot without Home Manager:
+### One-shot without Home Manager
 
 ```bash
-nix run 'git+ssh://git@github.com/maplevoid/voicein.git' -- daemon
+nix run github:maplevoid/voicein -- daemon
 ```
 
-Print a starter config (optional; missing file uses built-in defaults):
+## 3. Niri
 
-```bash
-mkdir -p ~/.config/voicein
-nix run 'git+ssh://git@github.com/maplevoid/voicein.git' -- config > ~/.config/voicein/config.toml
-```
-
-## Niri
-
-The module does not bind keys. Add them yourself:
+The module does not bind keys. Add them to `~/.config/niri/config.kdl`:
 
 ```kdl
 binds {
@@ -67,33 +125,41 @@ binds {
 }
 ```
 
-Second `toggle` stops and transcribes. `cancel` drops the take. The same
-commands work from a terminal.
+Second `toggle` stops and transcribes. `cancel` drops the take. Same commands
+work from a terminal.
 
-## Failure feedback
+## 4. Check it
 
-- Decode / record failure: HUD flashes red. No notification.
-- Inject failure: text stays on the clipboard; `notify-send` once. Set `notify = false` to silence that.
+```bash
+voicein status          # idle | recording | transcribing
+journalctl --user -u voicein -e
+```
 
-## Models
+A healthy start looks like:
 
-Default directory: `$XDG_DATA_HOME/voicein/models` (`~/.local/share/voicein/models`).
+```text
+engine sensevoice model=/home/you/.local/share/voicein/models/model.int8.onnx
+vad ready .../silero_vad.onnx; end on second keypress
+listening on /run/user/UID/voicein.sock
+hud: wayland ready 77x36 layer=overlay
+```
 
-| Engine | Files |
+| Symptom | Cause |
 | --- | --- |
-| SenseVoice (default) | `model.int8.onnx`, `tokens.txt` |
-| Whisper | `small-encoder.int8.onnx`, `small-decoder.int8.onnx`, `small-tokens.txt` |
-| HUD VAD | `silero_vad.onnx` |
-
-SenseVoice is ~0.3s after the second press. Mixed Chinese/English: set
-`engine = "whisper"` and fill encoder/decoder/tokens. Whisper is about 4× slower.
-
-VAD is only for the HUD. Decode uses the whole take (leading/trailing silence
-trimmed). Stop is always the second keypress or `max_record`.
+| `model ...: no such file or directory` | files not copied into `~/.local/share/voicein/models` |
+| `daemon not running (.../voicein.sock)` | unit not started in this session |
+| HUD flashes red, no notification | decode / record failed |
+| text on clipboard, one `notify-send` | inject failed (`notify = false` silences that) |
+| `pw-record: command not found` | PipeWire not on `PATH` |
 
 ## Config
 
-`$XDG_CONFIG_HOME/voicein/config.toml`. Empty / missing file = defaults.
+Optional. Missing file uses built-in defaults.
+
+```bash
+mkdir -p ~/.config/voicein
+nix run github:maplevoid/voicein -- config > ~/.config/voicein/config.toml
+```
 
 ```toml
 socket = ""                 # default: $XDG_RUNTIME_DIR/voicein.sock
