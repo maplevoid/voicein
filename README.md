@@ -15,7 +15,7 @@ the focused window. Thinking pauses do not end the take.
 
 ```nix
 {
-  inputs.voicein.url = "github:maplevoid/voicein";
+  inputs.voicein.url = "git+ssh://git@github.com/maplevoid/voicein.git";
 
   # NixOS + home-manager as a NixOS module:
   home-manager.users.<name>.imports = [
@@ -46,14 +46,14 @@ mkdir -p ~/.local/share/voicein/models
 One-shot without Home Manager:
 
 ```bash
-nix run github:maplevoid/voicein -- daemon
+nix run 'git+ssh://git@github.com/maplevoid/voicein.git' -- daemon
 ```
 
 Print a starter config (optional; missing file uses built-in defaults):
 
 ```bash
 mkdir -p ~/.config/voicein
-nix run github:maplevoid/voicein -- config > ~/.config/voicein/config.toml
+nix run 'git+ssh://git@github.com/maplevoid/voicein.git' -- config > ~/.config/voicein/config.toml
 ```
 
 ## Niri
