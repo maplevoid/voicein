@@ -1,9 +1,9 @@
 # voicein
 
-Niri 上的常驻语音输入 daemon。按一次开始听，再按一次（或静音 8 秒 / 满 60 秒）转写，注入当前焦点窗口。
+Niri 上的常驻语音输入 daemon。按一次开始听，再按一次（或满 60 秒）转写，注入当前焦点窗口。思考停顿不会自动结束。
 
 - 无窗口 daemon，不是 TUI，也不是 Tauri
-- 引擎默认 [SenseVoiceSmall](https://github.com/k2-fsa/sherpa-onnx) via sherpa-onnx，CPU，官方 Go 绑定
+- 引擎默认 SenseVoiceSmall；可切 [Whisper](https://github.com/k2-fsa/sherpa-onnx) small，CPU，官方 Go 绑定
 - 松手后再转。程序只暴露 `toggle` / `cancel` / `status`
 - 注入当前焦点窗口。失败留剪贴板
 - 登录就起 daemon，模型常驻
@@ -20,6 +20,7 @@ go build -o voicein ./cmd/voicein
 
 mkdir -p ~/.local/share/voicein/models ~/.config/voicein
 # SenseVoiceSmall int8 + tokens.txt + silero_vad.onnx
+# 或 Whisper small: small-encoder.int8.onnx + small-decoder.int8.onnx + small-tokens.txt
 # https://github.com/k2-fsa/sherpa-onnx/releases
 
 voicein config > ~/.config/voicein/config.toml   # optional
@@ -43,19 +44,19 @@ voicein status
 systemctl --user enable --now voicein.service
 ```
 
-热键需要写进 Niri 配置：
+热键已经写在当前 Niri 配置里：
 
 ```kdl
-spawn-at-startup "voicein" "daemon"
-
 binds {
-    Super+Shift+V { spawn "voicein" "toggle"; }
-    Super+Shift+C { spawn "voicein" "cancel"; }
+    Shift+Alt+V hotkey-overlay-title="Voice input: toggle" { spawn "voicein" "toggle"; }
+    Shift+Alt+C hotkey-overlay-title="Voice input: cancel" { spawn "voicein" "cancel"; }
 }
 ```
 
 第二次 `toggle` 结束并转写。`cancel` 丢弃当前段，不注入。
 没有热键时也可以在终端跑 `voicein toggle` / `voicein cancel`。
+
+NixOS 上 Niri 的 `spawn` 没有 `nix develop` 的 `LD_LIBRARY_PATH`。`sherpa-onnx` 需要 `libstdc++.so.6`，所以 `~/.local/bin/voicein` 必须是带库路径的包装脚本，真正的二进制放 `~/.local/libexec/voicein`。
 
 ## 失败反馈
 
@@ -66,9 +67,11 @@ binds {
 
 放到 `$XDG_DATA_HOME/voicein/models`（默认 `~/.local/share/voicein/models`）：
 
-- `model.int8.onnx` — SenseVoiceSmall
-- `tokens.txt`
-- `silero_vad.onnx` — 预留；当前录音用能量门限 + 8s 静音，VAD 文件暂未强制加载
+- SenseVoice：`model.int8.onnx` + `tokens.txt`
+- Whisper：`small-encoder.int8.onnx` + `small-decoder.int8.onnx` + `small-tokens.txt`
+- `silero_vad.onnx` — HUD 说话检测；解码用整段（只裁首尾静音），结束靠第二次按键
+
+默认 SenseVoice，第二次按完大约 0.3s 出字。中英夹杂再改 `engine = "whisper"` 并填 encoder/decoder/tokens。Whisper 大约慢 4 倍。
 
 ## 依赖
 

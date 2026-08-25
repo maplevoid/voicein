@@ -49,7 +49,6 @@ func Start(ctx context.Context, argv []string, sampleRate int) (*Recorder, error
 				r.errc <- err
 			}
 			close(r.errc)
-			close(r.samples)
 		})
 	}()
 	return r, nil
@@ -67,6 +66,7 @@ func (r *Recorder) Stop() {
 
 func (r *Recorder) read(rc io.ReadCloser, sampleRate int) {
 	defer rc.Close()
+	defer close(r.samples)
 	// ~20ms frames keep HUD and silence timer responsive.
 	frame := sampleRate / 50
 	if frame < 160 {
@@ -95,9 +95,19 @@ func RMS(samples []float32) float32 {
 	if len(samples) == 0 {
 		return 0
 	}
+	mean := mean32(samples)
 	var sum float64
 	for _, s := range samples {
-		sum += float64(s) * float64(s)
+		d := float64(s) - mean
+		sum += d * d
 	}
 	return float32(sum / float64(len(samples)))
+}
+
+func mean32(samples []float32) float64 {
+	var sum float64
+	for _, s := range samples {
+		sum += float64(s)
+	}
+	return sum / float64(len(samples))
 }

@@ -19,7 +19,7 @@ func TestLoadMissingUsesDefaults(t *testing.T) {
 	if cfg.SampleRate != 16000 {
 		t.Fatalf("sample rate %d", cfg.SampleRate)
 	}
-	if cfg.Silence != 8*time.Second {
+	if cfg.Silence != 3*time.Second {
 		t.Fatalf("silence %s", cfg.Silence)
 	}
 	if cfg.HUD.Layer != "overlay" {
@@ -38,6 +38,11 @@ language = "zh"
 itn = false
 threads = 4
 notify = false
+[model]
+engine = "whisper"
+encoder = "small-encoder.int8.onnx"
+decoder = "small-decoder.int8.onnx"
+tokens = "small-tokens.txt"
 [hud]
 enabled = false
 width = 100
@@ -60,6 +65,9 @@ x_paste = ["xdotool", "key", "ctrl+v"]
 	}
 	if cfg.SampleRate != 8000 || cfg.Language != "zh" || cfg.ITN || cfg.Notify {
 		t.Fatalf("unexpected cfg: %+v", cfg)
+	}
+	if cfg.EngineKind() != "whisper" || cfg.Model.Encoder != "small-encoder.int8.onnx" || cfg.Model.Decoder != "small-decoder.int8.onnx" {
+		t.Fatalf("model %+v", cfg.Model)
 	}
 	if cfg.Silence != 2*time.Second || cfg.MaxRecord != 10*time.Second {
 		t.Fatalf("durations silence=%s max=%s", cfg.Silence, cfg.MaxRecord)
@@ -85,5 +93,16 @@ func TestModelPaths(t *testing.T) {
 	cfg.Model.Onnx = "/abs/model.onnx"
 	if got := cfg.ModelOnnx(); got != "/abs/model.onnx" {
 		t.Fatal(got)
+	}
+	cfg.Model.Encoder = "enc.onnx"
+	cfg.Model.Decoder = "/abs/dec.onnx"
+	if got := cfg.ModelEncoder(); got != "/models/enc.onnx" {
+		t.Fatal(got)
+	}
+	if got := cfg.ModelDecoder(); got != "/abs/dec.onnx" {
+		t.Fatal(got)
+	}
+	if Defaults().EngineKind() != "sensevoice" {
+		t.Fatalf("default engine %q", Defaults().EngineKind())
 	}
 }

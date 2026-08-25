@@ -88,8 +88,14 @@ func assign(cfg *Config, section, key, val string) error {
 		switch key {
 		case "dir":
 			cfg.Model.Dir = s
+		case "engine":
+			cfg.Model.Engine = s
 		case "onnx":
 			cfg.Model.Onnx = s
+		case "encoder":
+			cfg.Model.Encoder = s
+		case "decoder":
+			cfg.Model.Decoder = s
 		case "tokens":
 			cfg.Model.Tokens = s
 		case "vad":

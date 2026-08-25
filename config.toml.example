@@ -3,17 +3,20 @@
 
 socket = ""                 # default: $XDG_RUNTIME_DIR/voicein.sock
 sample_rate = 16000
-silence = "8s"              # stop + transcribe after this much silence
+silence = "3s"              # unused for auto-stop; keep as think-pause hint
 max_record = "60s"          # hard stop
 language = "auto"           # auto | zh | en | yue | ja | ko
 itn = true
-threads = 2
+threads = 4
 notify = true               # notify-send/mako on failure only
 
 [model]
 dir = ""                    # default: $XDG_DATA_HOME/voicein/models
-onnx = "model.int8.onnx"
-tokens = "tokens.txt"
+engine = "sensevoice"       # sensevoice | whisper
+onnx = "model.int8.onnx"    # sensevoice
+encoder = "small-encoder.int8.onnx" # whisper
+decoder = "small-decoder.int8.onnx" # whisper
+tokens = "tokens.txt"       # whisper: small-tokens.txt
 vad = "silero_vad.onnx"
 
 [record]

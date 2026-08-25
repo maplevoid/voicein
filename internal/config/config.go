@@ -25,10 +25,13 @@ type Config struct {
 }
 
 type Model struct {
-	Dir    string `toml:"dir"`
-	Onnx   string `toml:"onnx"`
-	Tokens string `toml:"tokens"`
-	VAD    string `toml:"vad"`
+	Dir     string `toml:"dir"`
+	Engine  string `toml:"engine"`
+	Onnx    string `toml:"onnx"`
+	Encoder string `toml:"encoder"`
+	Decoder string `toml:"decoder"`
+	Tokens  string `toml:"tokens"`
+	VAD     string `toml:"vad"`
 }
 
 type Record struct {
@@ -67,14 +70,15 @@ func Defaults() Config {
 	return Config{
 		Socket:     filepath.Join(runtimeDir, "voicein.sock"),
 		SampleRate: 16000,
-		Silence:    8 * time.Second,
+		Silence:    3 * time.Second,
 		MaxRecord:  60 * time.Second,
 		Language:   "auto",
 		ITN:        true,
-		Threads:    2,
+		Threads:    4,
 		Notify:     true,
 		Model: Model{
 			Dir:    filepath.Join(dataDir, "voicein", "models"),
+			Engine: "sensevoice",
 			Onnx:   "model.int8.onnx",
 			Tokens: "tokens.txt",
 			VAD:    "silero_vad.onnx",
@@ -131,13 +135,13 @@ func Load() (Config, error) {
 		cfg.SampleRate = 16000
 	}
 	if cfg.Silence <= 0 {
-		cfg.Silence = 8 * time.Second
+		cfg.Silence = 3 * time.Second
 	}
 	if cfg.MaxRecord <= 0 {
 		cfg.MaxRecord = 60 * time.Second
 	}
 	if cfg.Threads <= 0 {
-		cfg.Threads = 2
+		cfg.Threads = 4
 	}
 	if cfg.HUD.Width <= 0 {
 		cfg.HUD.Width = 36
@@ -157,8 +161,27 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
+func (c Config) EngineKind() string {
+	e := strings.ToLower(strings.TrimSpace(c.Model.Engine))
+	if e == "" {
+		if c.Model.Encoder != "" && c.Model.Decoder != "" {
+			return "whisper"
+		}
+		return "sensevoice"
+	}
+	return e
+}
+
 func (c Config) ModelOnnx() string {
 	return resolve(c.Model.Dir, c.Model.Onnx)
+}
+
+func (c Config) ModelEncoder() string {
+	return resolve(c.Model.Dir, c.Model.Encoder)
+}
+
+func (c Config) ModelDecoder() string {
+	return resolve(c.Model.Dir, c.Model.Decoder)
 }
 
 func (c Config) ModelTokens() string {
@@ -186,16 +209,19 @@ func Example() string {
 
 socket = ""                 # default: $XDG_RUNTIME_DIR/voicein.sock
 sample_rate = 16000
-silence = "8s"              # stop + transcribe after this much silence
+silence = "3s"              # unused for auto-stop; keep as think-pause hint
 max_record = "60s"          # hard stop
 language = "auto"           # auto | zh | en | yue | ja | ko
 itn = true
-threads = 2
+threads = 4
 notify = true               # mako/notify-send on failure only
 
 [model]
 dir = ""                    # default: $XDG_DATA_HOME/voicein/models
-onnx = "model.int8.onnx"
+engine = "sensevoice"       # sensevoice | whisper
+onnx = "model.int8.onnx"    # sensevoice
+encoder = ""                # whisper encoder onnx
+decoder = ""                # whisper decoder onnx
 tokens = "tokens.txt"
 vad = "silero_vad.onnx"
 

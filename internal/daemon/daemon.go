@@ -21,6 +21,7 @@ import (
 type Daemon struct {
 	cfg      config.Config
 	engine   *asr.Engine
+	ep       *asr.Endpoint
 	hud      *hud.HUD
 	mu       sync.Mutex
 	state    ipc.State
@@ -43,6 +44,12 @@ func Run(cfg config.Config) error {
 		return err
 	}
 	defer engine.Close()
+	switch cfg.EngineKind() {
+	case "whisper":
+		log.Printf("engine whisper encoder=%s decoder=%s", cfg.ModelEncoder(), cfg.ModelDecoder())
+	default:
+		log.Printf("engine sensevoice model=%s", cfg.ModelOnnx())
+	}
 
 	ln, err := ipc.Listen(cfg.Socket)
 	if err != nil {
@@ -51,13 +58,21 @@ func Run(cfg config.Config) error {
 	defer ln.Close()
 	defer os.Remove(cfg.Socket)
 
+	ep := asr.NewEndpoint(cfg)
+	if ep.Live() {
+		log.Printf("vad ready %s; end on second keypress", cfg.ModelVAD())
+	} else {
+		log.Printf("vad unavailable; energy gate fallback, end on second keypress")
+	}
 	d := &Daemon{
 		cfg:    cfg,
 		engine: engine,
+		ep:     ep,
 		hud:    hud.Start(cfg.HUD),
 		state:  ipc.StateIdle,
 		quit:   make(chan struct{}),
 	}
+	defer d.ep.Close()
 	defer d.hud.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -145,6 +160,7 @@ func (d *Daemon) startRec() error {
 
 func (d *Daemon) recordLoop(ctx context.Context, rec *audio.Recorder) {
 	defer rec.Stop()
+	d.ep.Reset()
 
 	var (
 		pcm         []float32
@@ -159,7 +175,7 @@ func (d *Daemon) recordLoop(ctx context.Context, rec *audio.Recorder) {
 
 	flush := func(reason error) {
 		rec.Stop()
-		d.transcribe(pcm, reason)
+		d.transcribe(asr.TrimSpeech(pcm, d.cfg.SampleRate), reason)
 	}
 	for {
 		select {
@@ -178,10 +194,6 @@ func (d *Daemon) recordLoop(ctx context.Context, rec *audio.Recorder) {
 			flush(nil)
 			return
 		case <-tick.C:
-			if heard && time.Since(lastVoice) >= d.cfg.Silence {
-				flush(nil)
-				return
-			}
 			d.hud.Update(hud.Level{
 				RMS:     lastRMS(pcm),
 				Active:  heard && time.Since(lastVoice) < 400*time.Millisecond,
@@ -195,13 +207,15 @@ func (d *Daemon) recordLoop(ctx context.Context, rec *audio.Recorder) {
 				return
 			}
 			pcm = append(pcm, frame...)
-			if audio.RMS(frame) >= speechFloor {
+			rms := audio.RMS(frame)
+			speech := rms >= speechFloor || d.ep.Push(frame)
+			if speech {
 				heard = true
 				lastVoice = time.Now()
 			}
 			d.hud.Update(hud.Level{
-				RMS:     audio.RMS(frame),
-				Active:  audio.RMS(frame) >= speechFloor,
+				RMS:     rms,
+				Active:  speech,
 				Seconds: int(time.Since(d.started).Seconds()),
 			})
 		}
@@ -233,7 +247,7 @@ func (d *Daemon) transcribe(pcm []float32, recErr error) {
 	}
 	t0 := time.Now()
 	res, err := d.engine.Decode(pcm)
-	log.Printf("decode %d samples in %s: %v", len(pcm), time.Since(t0), err)
+	log.Printf("decode %d samples in %s lang=%q err=%v text=%q", len(pcm), time.Since(t0), res.Language, err, res.Text)
 	d.mu.Lock()
 	stale := d.gen != gen
 	d.mu.Unlock()
