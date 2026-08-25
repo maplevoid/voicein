@@ -12,39 +12,47 @@ Niri 上的常驻语音输入 daemon。按一次开始听，再按一次（或�
 - 反馈：底部正中一排细白竖条，1px 宽 1px 缝铺满 77px，静音一条淡基线，说话才按频段起伏
 - HUD 只在录音 / 转写时出现
 
-## Quick start
+## Install
+
+模型自己放，不进 Nix store。
 
 ```bash
-nix develop
-go build -o voicein ./cmd/voicein
-
-mkdir -p ~/.local/share/voicein/models ~/.config/voicein
+mkdir -p ~/.local/share/voicein/models
 # SenseVoiceSmall int8 + tokens.txt + silero_vad.onnx
 # 或 Whisper small: small-encoder.int8.onnx + small-decoder.int8.onnx + small-tokens.txt
 # https://github.com/k2-fsa/sherpa-onnx/releases
-
-voicein config > ~/.config/voicein/config.toml   # optional
-voicein daemon
 ```
 
-另一终端：
+一次性跑：
 
 ```bash
-voicein toggle    # start
-voicein toggle    # stop + transcribe + inject
-voicein cancel
-voicein status
+nix run github:maplevoid/voicein -- daemon
+```
+
+Home Manager / NixOS 用户模块：
+
+```nix
+{
+  inputs.voicein.url = "github:maplevoid/voicein";
+
+  # home-manager.users.<name>.imports 或 standalone home.nix
+  imports = [ inputs.voicein.homeManagerModules.default ];
+
+  services.voicein.enable = true;
+}
+```
+
+`enable` 会把包放进用户环境，并挂上 `graphical-session.target` 的 user unit。`pw-record` 和 `niri` 用系统里已有的，不要跟着这个 flake 再编一份。
+
+可选配置：
+
+```bash
+nix run github:maplevoid/voicein -- config > ~/.config/voicein/config.toml
 ```
 
 ## Niri
 
-登录自启走用户 systemd（`~/.config/niri/config.kdl` 由 home-manager 管，当前不可写）：
-
-```bash
-systemctl --user enable --now voicein.service
-```
-
-热键已经写在当前 Niri 配置里：
+热键自己写：
 
 ```kdl
 binds {
@@ -53,10 +61,7 @@ binds {
 }
 ```
 
-第二次 `toggle` 结束并转写。`cancel` 丢弃当前段，不注入。
-没有热键时也可以在终端跑 `voicein toggle` / `voicein cancel`。
-
-NixOS 上 Niri 的 `spawn` 没有 `nix develop` 的 `LD_LIBRARY_PATH`。`sherpa-onnx` 需要 `libstdc++.so.6`，所以 `~/.local/bin/voicein` 必须是带库路径的包装脚本，真正的二进制放 `~/.local/libexec/voicein`。
+第二次 `toggle` 结束并转写。`cancel` 丢弃当前段，不注入。没有热键也可以在终端跑同样的命令。
 
 ## 失败反馈
 
@@ -75,33 +80,24 @@ NixOS 上 Niri 的 `spawn` 没有 `nix develop` 的 `LD_LIBRARY_PATH`。`sherpa-
 
 ## 依赖
 
-运行时（NixOS / 用户环境）：
+包已经 wrap 了这些命令：
 
-- `pw-record`（pipewire）
 - `wl-copy`（wl-clipboard）
 - `wtype`（Wayland 窗口，如 Ghostty）
 - `xclip` + `xdotool`（XWayland 窗口，Flatpak QQ / 微信）
 - `notify-send`（libnotify / mako）
 
-注入看焦点窗口：Wayland 用 `wtype`，X11（`niri` 里 PID 是 `xwayland-satellite`）用 `xclip`/`xdotool`。
-文本始终先复制到对应剪贴板；粘贴失败再尝试逐字输入。
+还需要系统里已有的：
 
-NixOS / Home Manager 要把 X11 工具放进**用户环境**，不能只靠 `~/.local/bin` 临时 symlink。daemon 的 PATH 来自用户 systemd，登录后必须能直接找到 `xclip` 和 `xdotool`：
+- `pw-record`（PipeWire）
+- `niri`（探测焦点窗口是不是 XWayland）
 
-```nix
-# home.packages / users/.shared/niri.nix
-wtype
-xclip
-xdotool
-```
+注入看焦点窗口：Wayland 用 `wtype`，X11（`niri` 里 PID 是 `xwayland-satellite`）用 `xclip`/`xdotool`。文本始终先复制到对应剪贴板；粘贴失败再尝试逐字输入。
 
-然后 `home-manager switch` / `ug`。不要把这两个二进制手链到 nix store 路径。
-
-开发：
+## 开发
 
 ```bash
-nix flake init --template "https://flakehub.com/f/the-nix-way/dev-templates/*#go"
 nix develop
+go test ./...
+go build -o voicein ./cmd/voicein
 ```
-
-本仓库已经按这个模板初始化。测试和构建都走 `nix develop`。

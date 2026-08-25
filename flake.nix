@@ -14,6 +14,10 @@
         "aarch64-linux"
         "aarch64-darwin"
       ];
+      linuxSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
       forEachSupportedSystem =
         f:
         inputs.nixpkgs.lib.genAttrs supportedSystems (
@@ -22,7 +26,19 @@
             inherit system;
             pkgs = import inputs.nixpkgs {
               inherit system;
-              overlays = [ inputs.self.overlays.default ];
+              overlays = [ self.overlays.default ];
+            };
+          }
+        );
+      forEachLinuxSystem =
+        f:
+        inputs.nixpkgs.lib.genAttrs linuxSystems (
+          system:
+          f {
+            inherit system;
+            pkgs = import inputs.nixpkgs {
+              inherit system;
+              overlays = [ self.overlays.default ];
             };
           }
         );
@@ -30,6 +46,31 @@
     {
       overlays.default = final: prev: {
         go = final."go_1_${toString goVersion}";
+        voicein = final.callPackage ./nix/package.nix { };
+      };
+
+      packages = forEachLinuxSystem (
+        { pkgs, ... }:
+        rec {
+          voicein = pkgs.voicein;
+          default = voicein;
+        }
+      );
+
+      apps = forEachLinuxSystem (
+        { pkgs, ... }:
+        rec {
+          voicein = {
+            type = "app";
+            program = "${pkgs.voicein}/bin/voicein";
+          };
+          default = voicein;
+        }
+      );
+
+      homeManagerModules = {
+        voicein = import ./nix/hm-module.nix self;
+        default = self.homeManagerModules.voicein;
       };
 
       devShells = forEachSupportedSystem (
