@@ -47,6 +47,11 @@
             ];
             CGO_ENABLED = "1";
             LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ];
+            # Impure: expand at shell start so nix develop / direnv work.
+            shellHook = ''
+              export GOPATH="''${XDG_DATA_HOME:-$HOME/.local/share}/go"
+              export GOMODCACHE="''${XDG_CACHE_HOME:-$HOME/.cache}/go/mod"
+            '';
           };
         }
       );
