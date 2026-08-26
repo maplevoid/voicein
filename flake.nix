@@ -1,5 +1,5 @@
 {
-  description = "voicein — Niri push-to-toggle speech-to-text";
+  description = "voicein — Niri push-to-talk speech-to-text";
 
   inputs.nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.1"; # unstable Nixpkgs
 

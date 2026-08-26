@@ -9,6 +9,9 @@ language = "auto"           # auto | zh | en | yue | ja | ko
 itn = true
 threads = 4
 notify = true               # notify-send/mako on failure only
+mode = "hybrid"             # hybrid | toggle | hold
+tap = "300ms"               # hybrid: shorter tap latches; hold releases
+hotkey = "shift+alt+v"      # evdev chord; empty disables daemon hotkey
 
 [model]
 dir = ""                    # default: $XDG_DATA_HOME/voicein/models

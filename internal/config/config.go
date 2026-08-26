@@ -18,6 +18,9 @@ type Config struct {
 	ITN        bool          `toml:"itn"`
 	Threads    int           `toml:"threads"`
 	Notify     bool          `toml:"notify"`
+	Mode       string        `toml:"mode"`
+	Tap        time.Duration `toml:"tap"`
+	Hotkey     string        `toml:"hotkey"`
 	Model      Model         `toml:"model"`
 	Record     Record        `toml:"record"`
 	Inject     Inject        `toml:"inject"`
@@ -76,6 +79,9 @@ func Defaults() Config {
 		ITN:        true,
 		Threads:    4,
 		Notify:     true,
+		Mode:       "hybrid",
+		Tap:        300 * time.Millisecond,
+		Hotkey:     "shift+alt+v",
 		Model: Model{
 			Dir:    filepath.Join(dataDir, "voicein", "models"),
 			Engine: "sensevoice",
@@ -140,6 +146,9 @@ func Load() (Config, error) {
 	if cfg.MaxRecord <= 0 {
 		cfg.MaxRecord = 60 * time.Second
 	}
+	if cfg.Tap <= 0 {
+		cfg.Tap = 300 * time.Millisecond
+	}
 	if cfg.Threads <= 0 {
 		cfg.Threads = 4
 	}
@@ -170,6 +179,17 @@ func (c Config) EngineKind() string {
 		return "sensevoice"
 	}
 	return e
+}
+
+func (c Config) RecordMode() string {
+	switch strings.ToLower(strings.TrimSpace(c.Mode)) {
+	case "hold", "ptt", "push":
+		return "hold"
+	case "hybrid", "both", "tap":
+		return "hybrid"
+	default:
+		return "toggle"
+	}
 }
 
 func (c Config) ModelOnnx() string {
@@ -215,6 +235,9 @@ language = "auto"           # auto | zh | en | yue | ja | ko
 itn = true
 threads = 4
 notify = true               # mako/notify-send on failure only
+mode = "hybrid"             # hybrid | toggle | hold
+tap = "300ms"               # hybrid: shorter tap latches; hold releases
+hotkey = "shift+alt+v"      # evdev chord; empty disables daemon hotkey
 
 [model]
 dir = ""                    # default: $XDG_DATA_HOME/voicein/models

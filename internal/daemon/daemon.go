@@ -16,6 +16,7 @@ import (
 	"github.com/zway/voicein/internal/hud"
 	"github.com/zway/voicein/internal/inject"
 	"github.com/zway/voicein/internal/ipc"
+	"github.com/zway/voicein/internal/keys"
 	"github.com/zway/voicein/internal/wave"
 )
 
@@ -29,6 +30,7 @@ type Daemon struct {
 	err      string
 	text     string
 	started  time.Time
+	latched  bool
 	gen      uint64
 	cancel   context.CancelFunc
 	stop     chan struct{}
@@ -60,10 +62,17 @@ func Run(cfg config.Config) error {
 	defer os.Remove(cfg.Socket)
 
 	ep := asr.NewEndpoint(cfg)
+	endHow := "end on second keypress"
+	switch cfg.RecordMode() {
+	case "hold":
+		endHow = "end on key release"
+	case "hybrid":
+		endHow = fmt.Sprintf("tap <%s latches, hold releases", cfg.Tap)
+	}
 	if ep.Live() {
-		log.Printf("vad ready %s; end on second keypress", cfg.ModelVAD())
+		log.Printf("vad ready %s; %s", cfg.ModelVAD(), endHow)
 	} else {
-		log.Printf("vad unavailable; energy gate fallback, end on second keypress")
+		log.Printf("vad unavailable; energy gate fallback, %s", endHow)
 	}
 	d := &Daemon{
 		cfg:    cfg,
@@ -84,6 +93,12 @@ func Run(cfg config.Config) error {
 	}()
 
 	log.Printf("listening on %s", cfg.Socket)
+	if chord, err := keys.ParseHotkey(cfg.Hotkey); err != nil {
+		log.Printf("hotkey %q: %v", cfg.Hotkey, err)
+	} else if !chord.Empty() {
+		log.Printf("hotkey %s via evdev; niri bind optional (swallow key)", cfg.Hotkey)
+		go d.listenHotkey(ctx, chord)
+	}
 	errc := make(chan error, 1)
 	go func() {
 		errc <- ipc.Serve(ln, d.handle)
@@ -111,9 +126,54 @@ func (d *Daemon) handle(cmd ipc.Command) ipc.Reply {
 		return ipc.Reply{OK: true, Status: d.snapshot()}
 	case ipc.CmdToggle:
 		return d.toggle()
+	case ipc.CmdDown:
+		return d.press()
+	case ipc.CmdUp:
+		return d.release()
 	default:
 		return ipc.Reply{OK: false, Error: fmt.Sprintf("unknown command %q", cmd), Status: d.snapshot()}
 	}
+}
+
+func (d *Daemon) listenHotkey(ctx context.Context, chord keys.Chord) {
+	err := keys.Listen(ctx, chord, func(down bool) {
+		d.hotkey(down)
+	})
+	if err != nil && ctx.Err() == nil {
+		log.Printf("hotkey listen: %v", err)
+	}
+}
+
+func (d *Daemon) hotkey(down bool) {
+	d.mu.Lock()
+	st := d.state
+	latched := d.latched
+	started := d.started
+	mode := d.cfg.RecordMode()
+	tap := d.cfg.Tap
+	d.mu.Unlock()
+
+	held := time.Duration(0)
+	if st == ipc.StateRecording && !started.IsZero() {
+		held = time.Since(started)
+	}
+	switch keys.Classify(mode, down, st == ipc.StateRecording, latched, held, tap) {
+	case keys.ActionStart:
+		_ = d.beginRec()
+	case keys.ActionLatch:
+		d.latch()
+		log.Printf("hotkey latched (held %s < %s)", held.Round(time.Millisecond), tap)
+	case keys.ActionStop:
+		d.finishRec()
+	}
+}
+
+func (d *Daemon) latch() {
+	d.mu.Lock()
+	if d.state == ipc.StateRecording {
+		d.latched = true
+	}
+	d.mu.Unlock()
 }
 
 func (d *Daemon) toggle() ipc.Reply {
@@ -122,12 +182,7 @@ func (d *Daemon) toggle() ipc.Reply {
 	d.mu.Unlock()
 	switch st {
 	case ipc.StateIdle:
-		if err := d.startRec(); err != nil {
-			d.setIdle(err.Error(), "")
-			inject.Notify(context.Background(), d.cfg, "voicein", err.Error())
-			return ipc.Reply{OK: false, Error: err.Error(), Status: d.snapshot()}
-		}
-		return ipc.Reply{OK: true, Status: d.snapshot()}
+		return d.beginRec()
 	case ipc.StateRecording:
 		d.finishRec()
 		return ipc.Reply{OK: true, Status: d.snapshot()}
@@ -136,27 +191,57 @@ func (d *Daemon) toggle() ipc.Reply {
 	}
 }
 
-func (d *Daemon) startRec() error {
+func (d *Daemon) press() ipc.Reply {
+	d.mu.Lock()
+	st := d.state
+	d.mu.Unlock()
+	if st == ipc.StateIdle {
+		return d.beginRec()
+	}
+	return ipc.Reply{OK: true, Status: d.snapshot()}
+}
+
+func (d *Daemon) release() ipc.Reply {
+	d.mu.Lock()
+	st := d.state
+	d.mu.Unlock()
+	if st == ipc.StateRecording {
+		d.finishRec()
+	}
+	return ipc.Reply{OK: true, Status: d.snapshot()}
+}
+
+func (d *Daemon) beginRec() ipc.Reply {
+	if _, err := d.startRec(); err != nil {
+		d.setIdle(err.Error(), "")
+		inject.Notify(context.Background(), d.cfg, "voicein", err.Error())
+		return ipc.Reply{OK: false, Error: err.Error(), Status: d.snapshot()}
+	}
+	return ipc.Reply{OK: true, Status: d.snapshot()}
+}
+
+func (d *Daemon) startRec() (context.Context, error) {
 	d.mu.Lock()
 	if d.state != ipc.StateIdle {
 		d.mu.Unlock()
-		return nil
+		return context.Background(), nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
 	d.stop = make(chan struct{})
 	d.state = ipc.StateRecording
 	d.err = ""
+	d.latched = false
 	d.started = time.Now()
 	d.mu.Unlock()
 
 	rec, err := audio.Start(ctx, d.cfg.Record.Command, d.cfg.SampleRate)
 	if err != nil {
 		cancel()
-		return err
+		return ctx, err
 	}
 	go d.recordLoop(ctx, rec)
-	return nil
+	return ctx, nil
 }
 
 func (d *Daemon) recordLoop(ctx context.Context, rec *audio.Recorder) {
@@ -312,6 +397,7 @@ func (d *Daemon) setIdle(errText, text string) {
 		d.cancel = nil
 	}
 	d.state = ipc.StateIdle
+	d.latched = false
 	d.err = errText
 	if text != "" {
 		d.text = text
@@ -331,6 +417,7 @@ func (d *Daemon) finishIdle(gen uint64, errText, text string) {
 		d.cancel = nil
 	}
 	d.state = ipc.StateIdle
+	d.latched = false
 	d.err = errText
 	if text != "" {
 		d.text = text

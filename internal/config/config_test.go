@@ -25,6 +25,12 @@ func TestLoadMissingUsesDefaults(t *testing.T) {
 	if cfg.HUD.Layer != "overlay" {
 		t.Fatalf("layer %q", cfg.HUD.Layer)
 	}
+	if cfg.RecordMode() != "hybrid" {
+		t.Fatalf("mode %q", cfg.Mode)
+	}
+	if cfg.Tap != 300*time.Millisecond {
+		t.Fatalf("tap %s", cfg.Tap)
+	}
 }
 
 func TestLoadOverrides(t *testing.T) {
@@ -38,6 +44,10 @@ language = "zh"
 itn = false
 threads = 4
 notify = false
+mode = "hold"
+tap = "150ms"
+hotkey = "super+shift+v"
+
 [model]
 engine = "whisper"
 encoder = "small-encoder.int8.onnx"
@@ -66,6 +76,16 @@ x_paste = ["xdotool", "key", "ctrl+v"]
 	if cfg.SampleRate != 8000 || cfg.Language != "zh" || cfg.ITN || cfg.Notify {
 		t.Fatalf("unexpected cfg: %+v", cfg)
 	}
+	if cfg.RecordMode() != "hold" {
+		t.Fatalf("mode %q", cfg.Mode)
+	}
+	if cfg.Hotkey != "super+shift+v" {
+		t.Fatalf("hotkey %q", cfg.Hotkey)
+	}
+	if cfg.Tap != 150*time.Millisecond {
+		t.Fatalf("tap %s", cfg.Tap)
+	}
+
 	if cfg.EngineKind() != "whisper" || cfg.Model.Encoder != "small-encoder.int8.onnx" || cfg.Model.Decoder != "small-decoder.int8.onnx" {
 		t.Fatalf("model %+v", cfg.Model)
 	}
@@ -104,5 +124,25 @@ func TestModelPaths(t *testing.T) {
 	}
 	if Defaults().EngineKind() != "sensevoice" {
 		t.Fatalf("default engine %q", Defaults().EngineKind())
+	}
+}
+
+func TestRecordMode(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", "toggle"},
+		{"toggle", "toggle"},
+		{"hold", "hold"},
+		{"ptt", "hold"},
+		{"hybrid", "hybrid"},
+		{"both", "hybrid"},
+		{"tap", "hybrid"},
+	}
+	for _, tc := range cases {
+		cfg := Config{Mode: tc.in}
+		if got := cfg.RecordMode(); got != tc.want {
+			t.Fatalf("mode %q: got %q want %q", tc.in, got, tc.want)
+		}
 	}
 }

@@ -16,6 +16,8 @@ type Command string
 
 const (
 	CmdToggle Command = "toggle"
+	CmdDown   Command = "down"
+	CmdUp     Command = "up"
 	CmdCancel Command = "cancel"
 	CmdStatus Command = "status"
 	CmdQuit   Command = "quit"
@@ -133,7 +135,7 @@ func readRequest(r io.Reader) (Request, error) {
 	}
 	req.Cmd = Command(strings.ToLower(line))
 	switch req.Cmd {
-	case CmdToggle, CmdCancel, CmdStatus, CmdQuit:
+	case CmdToggle, CmdDown, CmdUp, CmdCancel, CmdStatus, CmdQuit:
 		return req, nil
 	default:
 		return Request{}, fmt.Errorf("unknown command %q", line)

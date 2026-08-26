@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -15,9 +16,10 @@ func TestHelpAndConfig(t *testing.T) {
 	if err := Run([]string{"help"}, Deps{Stdout: &buf}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(buf.String(), "toggle") {
+	if !strings.Contains(buf.String(), "toggle") || !strings.Contains(buf.String(), "hotkey") {
 		t.Fatalf("help: %q", buf.String())
 	}
+
 	buf.Reset()
 	if err := Run([]string{"config"}, Deps{Stdout: &buf}); err != nil {
 		t.Fatal(err)
@@ -67,5 +69,29 @@ func TestToggleOK(t *testing.T) {
 	}
 	if got := strings.TrimSpace(buf.String()); got != "recording 2s" {
 		t.Fatal(got)
+	}
+}
+
+func TestDownAndUpOK(t *testing.T) {
+	var cmds []ipc.Command
+	call := func(_ string, cmd ipc.Command) (ipc.Reply, error) {
+		cmds = append(cmds, cmd)
+		st := ipc.StateRecording
+		if cmd == ipc.CmdUp {
+			st = ipc.StateTranscribing
+		}
+		return ipc.Reply{OK: true, Status: ipc.Status{State: st}}, nil
+	}
+	load := func() (config.Config, error) {
+		return config.Config{Socket: "x"}, nil
+	}
+	if err := Run([]string{"down"}, Deps{Load: load, Call: call, Stdout: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run([]string{"up"}, Deps{Load: load, Call: call, Stdout: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	if len(cmds) != 2 || cmds[0] != ipc.CmdDown || cmds[1] != ipc.CmdUp {
+		t.Fatalf("cmds %v", cmds)
 	}
 }

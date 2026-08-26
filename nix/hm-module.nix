@@ -12,7 +12,7 @@ let
 in
 {
   options.services.voicein = {
-    enable = lib.mkEnableOption "voicein, a Niri push-to-toggle speech-to-text daemon";
+    enable = lib.mkEnableOption "voicein, a Niri push-to-talk speech-to-text daemon";
 
     package = lib.mkOption {
       type = lib.types.package;

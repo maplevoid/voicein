@@ -33,7 +33,7 @@ func Run(args []string, d Deps) error {
 			return err
 		}
 		return d.Daemon(cfg)
-	case "toggle", "cancel", "status", "quit":
+	case "toggle", "down", "up", "cancel", "status", "quit":
 		cfg, err := load(d)
 		if err != nil {
 			return err
@@ -76,17 +76,24 @@ func call(d Deps, socket string, cmd ipc.Command) (ipc.Reply, error) {
 }
 
 func Usage() string {
-	return `voicein - push-to-toggle speech-to-text for Niri
+	return `voicein - push-to-talk speech-to-text for Niri
 
 Commands:
   daemon    stay resident, load SenseVoice, listen on the unix socket
   toggle    start recording, or stop and transcribe
+  down      start a hold take
+  up        finish a hold take and transcribe
   cancel    discard the current take
   status    print idle | recording | transcribing
   quit      stop the daemon
   config    print an example config.toml
 
 Config: $XDG_CONFIG_HOME/voicein/config.toml
+  mode = "hybrid"   tap latches toggle; hold releases
+  mode = "toggle"   press the hotkey to start, press again to stop
+  mode = "hold"     hold the hotkey; release to stop
+  tap = "300ms"     hybrid only: shorter tap latches
+  hotkey = "shift+alt+v"  daemon reads evdev; empty disables it
 Models: $XDG_DATA_HOME/voicein/models
 Socket: $XDG_RUNTIME_DIR/voicein.sock
 `

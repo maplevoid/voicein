@@ -1,18 +1,29 @@
 # voicein
 
-Push-to-toggle speech-to-text for [Niri](https://github.com/YaLTeR/niri) on
-Linux. Press once to start listening, press again (or hit 60s) to transcribe
-into the focused window. Thinking pauses do not end the take.
+Push-to-talk speech-to-text for [Niri](https://github.com/YaLTeR/niri) on
+Linux. The daemon owns the hotkey via `/dev/input/event*`. Niri does not
+need to spawn `voicein` on press.
+
+Three record modes:
+
+- `hybrid` (default): press starts recording. A tap shorter than `tap`
+  (300ms) latches like toggle; hold past that threshold stops on release.
+  A later press stops a latched take.
+- `toggle`: press the hotkey to start, press again (or hit 60s) to transcribe.
+- `hold`: hold the hotkey; release (or hit 60s) to transcribe.
+
+Thinking pauses do not end the take.
 
 - Headless daemon. Not a TUI, not a window.
 - Default engine: [SenseVoiceSmall](https://github.com/k2-fsa/sherpa-onnx) int8 on CPU. Whisper small is optional.
-- Commands: `daemon` / `toggle` / `cancel` / `status` / `quit` / `config`.
+- Commands: `daemon` / `toggle` / `down` / `up` / `cancel` / `status` / `quit` / `config`.
 - Injects into the focused window. Paste failure leaves the text on the clipboard.
 - Models stay in `$XDG_DATA_HOME/voicein/models`. They are never copied into the Nix store.
 - HUD is a 77px row of 1px bars at the bottom center. Silent = one faint baseline. Speech moves the bands. Visible only while recording or transcribing.
 
-Linux only (`x86_64` / `aarch64`). Needs [Niri](https://github.com/YaLTeR/niri)
-and PipeWire (`pw-record`).
+Linux only (`x86_64` / `aarch64`). Needs PipeWire (`pw-record`). The user
+must be in group `input` so the daemon can read evdev.
+
 
 ## 1. Models
 
@@ -114,19 +125,21 @@ voicein status   # idle
 nix run github:maplevoid/voicein -- daemon
 ```
 
-## 3. Niri
+## 3. Hotkey
 
-The module does not bind keys. Add them to `~/.config/niri/config.kdl`:
+The daemon reads `/dev/input/event*` and needs group `input`.
+Niri is optional. Bind the same chord to an empty action so the letter
+does not type into the focused window.
 
 ```kdl
 binds {
-    Shift+Alt+V hotkey-overlay-title="Voice input: toggle" { spawn "voicein" "toggle"; }
+    Shift+Alt+V repeat=false hotkey-overlay-title="Voice input" { spawn "true"; }
     Shift+Alt+C hotkey-overlay-title="Voice input: cancel" { spawn "voicein" "cancel"; }
 }
 ```
 
-Second `toggle` stops and transcribes. `cancel` drops the take. Same commands
-work from a terminal.
+`hotkey = ""` disables the evdev listener. `toggle` / `down` / `up` still
+work from a terminal or a compositor bind. `cancel` drops the take.
 
 ## 4. Check it
 
@@ -139,8 +152,9 @@ A healthy start looks like:
 
 ```text
 engine sensevoice model=/home/you/.local/share/voicein/models/model.int8.onnx
-vad ready .../silero_vad.onnx; end on second keypress
+vad ready .../silero_vad.onnx; tap <300ms latches, hold releases
 listening on /run/user/UID/voicein.sock
+hotkey shift+alt+v via evdev; niri bind optional (swallow key)
 hud: wayland ready 77x36 layer=overlay
 ```
 
@@ -151,6 +165,10 @@ hud: wayland ready 77x36 layer=overlay
 | HUD flashes red, no notification | decode / record failed |
 | text on clipboard, one `notify-send` | inject failed (`notify = false` silences that) |
 | `pw-record: command not found` | PipeWire not on `PATH` |
+| hotkey does nothing | user not in group `input`; check `hotkey listen:` in the journal |
+| letter still types into the window | add a Niri bind that swallows the chord |
+
+
 
 ## Config
 
@@ -169,6 +187,9 @@ language = "auto"           # auto | zh | en | yue | ja | ko
 itn = true
 threads = 4
 notify = true
+mode = "hybrid"             # hybrid | toggle | hold
+tap = "300ms"               # hybrid: shorter tap latches; hold releases
+hotkey = "shift+alt+v"      # evdev; empty disables
 
 [model]
 dir = ""                    # default: $XDG_DATA_HOME/voicein/models

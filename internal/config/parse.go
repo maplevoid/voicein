@@ -82,6 +82,16 @@ func assign(cfg *Config, section, key, val string) error {
 				return err
 			}
 			cfg.Notify = b
+		case "mode":
+			cfg.Mode, _ = unquote(val)
+		case "hotkey":
+			cfg.Hotkey, _ = unquote(val)
+		case "tap":
+			d, err := parseDuration(val)
+			if err != nil {
+				return err
+			}
+			cfg.Tap = d
 		}
 	case "model":
 		s, _ := unquote(val)
