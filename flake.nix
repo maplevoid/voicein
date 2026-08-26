@@ -1,7 +1,7 @@
 {
   description = "voicein — Niri push-to-talk speech-to-text";
 
-  inputs.nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.1"; # unstable Nixpkgs
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
   outputs =
     { self, ... }@inputs:

@@ -1,16 +1,16 @@
 # voicein
 
-Push-to-talk speech-to-text for [Niri](https://github.com/YaLTeR/niri) on
-Linux. The daemon owns the hotkey via `/dev/input/event*`. Niri does not
-need to spawn `voicein` on press.
+Push-to-talk speech-to-text for Linux. The daemon owns the hotkey via
+`/dev/input/event*`. A compositor bind is only there to swallow the chord
+so `v` does not type into the focused window.
 
 Three record modes:
 
 - `hybrid` (default): press starts recording. A tap shorter than `tap`
   (300ms) latches like toggle; hold past that threshold stops on release.
   A later press stops a latched take.
-- `toggle`: press the hotkey to start, press again (or hit 60s) to transcribe.
-- `hold`: hold the hotkey; release (or hit 60s) to transcribe.
+- `toggle`: press to start, press again (or hit 60s) to transcribe.
+- `hold`: hold; release (or hit 60s) to transcribe.
 
 Thinking pauses do not end the take.
 
@@ -19,21 +19,16 @@ Thinking pauses do not end the take.
 - Commands: `daemon` / `toggle` / `down` / `up` / `cancel` / `status` / `quit` / `config`.
 - Injects into the focused window. Paste failure leaves the text on the clipboard.
 - Models stay in `$XDG_DATA_HOME/voicein/models`. They are never copied into the Nix store.
-- HUD is a 77px row of 1px bars at the bottom center. Silent = one faint baseline. Speech moves the bands. Visible only while recording or transcribing.
+- HUD is a 77px row of 1px bars at the bottom center. Visible only while recording or transcribing.
 
-Linux only (`x86_64` / `aarch64`). Needs PipeWire (`pw-record`). The user
-must be in group `input` so the daemon can read evdev.
+Linux only (`x86_64` / `aarch64`). Needs PipeWire (`pw-record`).
 
+`nix run` / the Home Manager module is not enough. Without models the
+daemon exits. Without group `input` it starts but the hotkey does nothing.
 
 ## 1. Models
 
-Models are not part of the package. Put them here before starting the daemon:
-
-```text
-~/.local/share/voicein/models/
-```
-
-SenseVoice (default, ~229MB) plus Silero VAD (~0.6MB):
+Do this first. The package does not download them.
 
 ```bash
 mkdir -p ~/.local/share/voicein/models
@@ -50,21 +45,20 @@ curl -L -o ~/.local/share/voicein/models/silero_vad.onnx \
   https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
 ```
 
-VAD is only for the HUD. Missing `silero_vad.onnx` still starts the daemon
-(energy-gate fallback). Missing `model.int8.onnx` or `tokens.txt` does not.
+Required: `model.int8.onnx` + `tokens.txt`.
+`silero_vad.onnx` is HUD only; missing it still starts (energy-gate fallback).
 
-Optional Whisper small (~360MB). Copy the int8 files as-is:
+Optional Whisper small (~360MB):
 
 ```bash
 curl -L -o whisper.tar.bz2 \
   https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.tar.bz2
 tar xf whisper.tar.bz2
-cp sherpa-onnx-whisper-small/small-encoder.int8.onnx ~/.local/share/voicein/models/
-cp sherpa-onnx-whisper-small/small-decoder.int8.onnx ~/.local/share/voicein/models/
-cp sherpa-onnx-whisper-small/small-tokens.txt        ~/.local/share/voicein/models/
+cp sherpa-onnx-whisper-small/small-encoder.int8.onnx \
+   sherpa-onnx-whisper-small/small-decoder.int8.onnx \
+   sherpa-onnx-whisper-small/small-tokens.txt \
+   ~/.local/share/voicein/models/
 ```
-
-Then in `~/.config/voicein/config.toml`:
 
 ```toml
 [model]
@@ -76,13 +70,27 @@ tokens = "small-tokens.txt"
 
 Whisper is about 4× slower than SenseVoice.
 
-## 2. Install
+## 2. Group `input`
+
+The daemon reads `/dev/input/event*` (`crw-rw---- root input`).
+The Home Manager module does **not** add this group.
+
+```nix
+# NixOS
+users.users.<name>.extraGroups = [ "input" ];
+```
+
+Then `nixos-rebuild switch` **and log out / back in**. `id` must show
+`input` before the hotkey can work. `groups` in an old terminal lies.
+
+## 3. Install
 
 ### Home Manager on NixOS
 
 ```nix
 {
   inputs.voicein.url = "github:maplevoid/voicein";
+  inputs.voicein.inputs.nixpkgs.follows = "nixpkgs";
 
   # inside nixosSystem { modules = [ ... ]; }
   home-manager.users.<name>.imports = [
@@ -91,6 +99,9 @@ Whisper is about 4× slower than SenseVoice.
   home-manager.users.<name>.services.voicein.enable = true;
 }
 ```
+
+`follows` keeps the friend on their own nixpkgs. Without it this flake
+pulls `nixos-unstable` as well.
 
 ### Standalone `home.nix`
 
@@ -105,13 +116,16 @@ Whisper is about 4× slower than SenseVoice.
 ```
 
 `enable` puts `voicein` on `PATH`, creates
-`~/.local/share/voicein/models`, and starts a user unit on
-`graphical-session.target`. The package wraps `wl-copy`, `wtype`, `xclip`,
-`xdotool`, and `notify-send`. Use the host's `pw-record` and `niri`; do not
-rebuild those from this flake.
+`~/.local/share/voicein/models`, and installs a user unit on
+`graphical-session.target`. It does not download models and does not
+add group `input`.
+
+The package wraps `wl-copy`, `wtype`, `xclip`, `xdotool`, and
+`notify-send`. Use the host's `pw-record`. Do not rebuild PipeWire
+from this flake.
 
 After `home-manager switch` / `nixos-rebuild switch`, if this graphical
-session was already running:
+session was already running the unit is installed but not started:
 
 ```bash
 systemctl --user daemon-reload
@@ -119,17 +133,28 @@ systemctl --user start voicein
 voicein status   # idle
 ```
 
+A path pin (`voicein.url = "path:/…/voicein"`) needs
+`nix flake update voicein` after you pull, then rebuild. Otherwise
+the live unit keeps the old store path.
+
 ### One-shot without Home Manager
+
+Models and group `input` still required.
 
 ```bash
 nix run github:maplevoid/voicein -- daemon
 ```
 
-## 3. Hotkey
+Without models this exits immediately:
 
-The daemon reads `/dev/input/event*` and needs group `input`.
-Niri is optional. Bind the same chord to an empty action so the letter
-does not type into the focused window.
+```text
+model ~/.local/share/voicein/models/tokens.txt: no such file or directory
+```
+
+## 4. Swallow the chord
+
+Niri (or any compositor) does not start recording. Bind the same chord
+to a no-op so the key is not typed. `cancel` is still a CLI spawn.
 
 ```kdl
 binds {
@@ -138,13 +163,14 @@ binds {
 }
 ```
 
-`hotkey = ""` disables the evdev listener. `toggle` / `down` / `up` still
-work from a terminal or a compositor bind. `cancel` drops the take.
+`hotkey = ""` disables evdev. `toggle` / `down` / `up` still work from
+a terminal or a compositor bind.
 
-## 4. Check it
+## 5. Check it
 
 ```bash
-voicein status          # idle | recording | transcribing
+id                 # must list input
+voicein status     # idle
 journalctl --user -u voicein -e
 ```
 
@@ -160,15 +186,14 @@ hud: wayland ready 77x36 layer=overlay
 
 | Symptom | Cause |
 | --- | --- |
-| `model ...: no such file or directory` | files not copied into `~/.local/share/voicein/models` |
+| `model .../tokens.txt: no such file or directory` | step 1 skipped |
 | `daemon not running (.../voicein.sock)` | unit not started in this session |
+| hotkey does nothing, journal `hotkey listen:` | not in group `input`, or no logout since adding it |
+| letter still types into the window | no swallow bind |
+| `pw-record: command not found` | PipeWire not on `PATH` |
 | HUD flashes red, no notification | decode / record failed |
 | text on clipboard, one `notify-send` | inject failed (`notify = false` silences that) |
-| `pw-record: command not found` | PipeWire not on `PATH` |
-| hotkey does nothing | user not in group `input`; check `hotkey listen:` in the journal |
-| letter still types into the window | add a Niri bind that swallows the chord |
-
-
+| `unknown command "down"` | old binary; rebuild / `nix flake update voicein` |
 
 ## Config
 
