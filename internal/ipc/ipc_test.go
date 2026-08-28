@@ -2,6 +2,7 @@ package ipc
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -49,6 +50,21 @@ func TestCallToggleStatus(t *testing.T) {
 	}
 	if Format(reply.Status) != "idle" {
 		t.Fatalf("status format %q", Format(reply.Status))
+	}
+}
+
+func TestListenRejectsLiveSocket(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "voicein.sock")
+	ln, err := Listen(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		_ = Serve(ln, func(Command) Reply { return Reply{OK: true, Status: Status{State: StateIdle}} })
+	}()
+	if _, err := Listen(sock); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("got %v", err)
 	}
 }
 

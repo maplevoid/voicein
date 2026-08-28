@@ -52,6 +52,9 @@ func Listen(path string) (net.Listener, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
+	if _, err := Call(path, CmdStatus); err == nil {
+		return nil, fmt.Errorf("already running (%s)", path)
+	}
 	_ = os.Remove(path)
 	ln, err := net.Listen("unix", path)
 	if err != nil {
