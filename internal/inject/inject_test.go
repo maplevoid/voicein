@@ -11,7 +11,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	lookupNiri = func() (int, bool) { return 0, false }
+	lookupX11 = func() bool { return false }
 	os.Exit(m.Run())
 }
 
@@ -103,11 +103,9 @@ func TestTextUsesX11CommandsWhenFocusedX11(t *testing.T) {
 	cfg.Inject.XCopy = []string{"sh", "-c", "cat > " + clip}
 	cfg.Inject.XPaste = []string{"sh", "-c", "echo pasted > " + paste}
 	cfg.Inject.XType = nil
-	lookupNiri = func() (int, bool) { return 2501, true }
-	readComm = func(int) (string, error) { return "xwayland-satellite\n", nil }
+	lookupX11 = func() bool { return true }
 	t.Cleanup(func() {
-		lookupNiri = nil
-		readComm = nil
+		lookupX11 = func() bool { return false }
 	})
 
 	res, err := Text(context.Background(), cfg, "qq")
@@ -126,15 +124,26 @@ func TestTextUsesX11CommandsWhenFocusedX11(t *testing.T) {
 	}
 }
 
-func TestFocusedX11MatchesSatelliteComm(t *testing.T) {
-	lookupNiri = func() (int, bool) { return 2501, true }
-	readComm = func(int) (string, error) { return ".xwayland-satel\n", nil }
-	t.Cleanup(func() {
-		lookupNiri = func() (int, bool) { return 0, false }
-		readComm = nil
-	})
-	if !focusedX11() {
-		t.Fatal("expected xwayland-satellite comm to route X11")
+func TestSessionIsX11(t *testing.T) {
+	t.Setenv("XDG_SESSION_TYPE", "x11")
+	t.Setenv("WAYLAND_DISPLAY", "wayland-1")
+	if !sessionIsX11() {
+		t.Fatal("x11 session")
+	}
+	t.Setenv("XDG_SESSION_TYPE", "wayland")
+	t.Setenv("DISPLAY", ":0")
+	if sessionIsX11() {
+		t.Fatal("wayland session")
+	}
+	t.Setenv("XDG_SESSION_TYPE", "")
+	t.Setenv("DISPLAY", ":0")
+	t.Setenv("WAYLAND_DISPLAY", "")
+	if !sessionIsX11() {
+		t.Fatal("DISPLAY without WAYLAND_DISPLAY")
+	}
+	t.Setenv("WAYLAND_DISPLAY", "wayland-0")
+	if sessionIsX11() {
+		t.Fatal("mixed session defaults to Wayland")
 	}
 }
 

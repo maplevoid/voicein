@@ -3,12 +3,10 @@ package inject
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 
@@ -64,53 +62,23 @@ func route(inj config.Inject) (copyCmd, pasteCmd, typeCmd []string) {
 	return inj.Copy, inj.Paste, inj.Type
 }
 
-type niriWindow struct {
-	PID int `json:"pid"`
-}
+var lookupX11 func() bool
 
 func focusedX11() bool {
-	look := lookupNiri
-	if look == nil {
-		look = niriFocusedPID
+	if lookupX11 != nil {
+		return lookupX11()
 	}
-	pid, ok := look()
-	if !ok || pid <= 0 {
-		return false
-	}
-	read := readComm
-	if read == nil {
-		read = procComm
-	}
-	name, err := read(pid)
-	if err != nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(name), "xwayland")
+	return sessionIsX11()
 }
 
-var (
-	lookupNiri func() (int, bool)
-	readComm   func(int) (string, error)
-)
-
-func procComm(pid int) (string, error) {
-	name, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/comm")
-	if err != nil {
-		return "", err
+func sessionIsX11() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("XDG_SESSION_TYPE"))) {
+	case "x11":
+		return true
+	case "wayland":
+		return false
 	}
-	return string(name), nil
-}
-
-func niriFocusedPID() (int, bool) {
-	out, err := exec.Command("niri", "msg", "-j", "focused-window").Output()
-	if err != nil {
-		return 0, false
-	}
-	var win niriWindow
-	if err := json.Unmarshal(out, &win); err != nil || win.PID <= 0 {
-		return 0, false
-	}
-	return win.PID, true
+	return os.Getenv("DISPLAY") != "" && os.Getenv("WAYLAND_DISPLAY") == ""
 }
 
 func Notify(ctx context.Context, cfg config.Config, title, body string) {
@@ -150,6 +118,7 @@ func runStdin(ctx context.Context, argv []string, stdin string) error {
 	}
 	return nil
 }
+
 // startStdin writes stdin then returns. Commands that stay alive as a
 // clipboard owner (wl-copy) are detached; commands that exit after
 // consuming stdin are waited on briefly so tests can observe the write.
