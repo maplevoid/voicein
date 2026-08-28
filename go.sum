@@ -1,11 +1,3 @@
-github.com/k2-fsa/sherpa-onnx-go v1.8.18 h1:gbPl0RvjfXPcUEBUamxAD1T1dOluFweC3UBcsx6jRkY=
-github.com/k2-fsa/sherpa-onnx-go v1.8.18/go.mod h1:JEBDXFl5savR6cWxE/+wSodjG37XUAwQzewb9Qlcv5w=
-github.com/k2-fsa/sherpa-onnx-go-linux v1.13.6 h1:CupI5dGvUgjGueu2Ju701qSAnn1+i+F0zkzGA74lttM=
-github.com/k2-fsa/sherpa-onnx-go-linux v1.13.6/go.mod h1:NXEH2rsBgTdqY59YpPq6CtSBlBAXy/8a9FmpLERU97I=
-github.com/k2-fsa/sherpa-onnx-go-macos v1.13.6 h1:RomjkUOYDsYawgRDSbf0TsK7IKApQqfrsnXAJUe5omw=
-github.com/k2-fsa/sherpa-onnx-go-macos v1.13.6/go.mod h1:ZOhUAXC62Unj0ZNfu6zxSFKcW96aXf7P3BsqiUyOBbE=
-github.com/k2-fsa/sherpa-onnx-go-windows v1.13.6 h1:iERze3L0ysXctzsn+p4Uhuj5NbqybKa78U5UTTxbs6g=
-github.com/k2-fsa/sherpa-onnx-go-windows v1.13.6/go.mod h1:5AX7TU8+P/gInjglY1ijtWUM2b8iyR0QX4yEngzMe64=
 github.com/rajveermalviya/go-wayland/wayland v0.0.0-20230130181619-0ad78d1310b2 h1:tRhbehjSCwQSZL7A2AoZlKrDYhZzaPIAcpnhfaUc0Tw=
 github.com/rajveermalviya/go-wayland/wayland v0.0.0-20230130181619-0ad78d1310b2/go.mod h1:PXhW/GoWcMBeiZ39ZdgoMs/xduJEEUE+kxUBB2Kwd+M=
 golang.org/x/sys v0.0.0-20211117180635-dee7805ff2e1 h1:kwrAHlwJ0DUBZwQ238v+Uod/3eZ8B2K5rYsUHBQvzmI=

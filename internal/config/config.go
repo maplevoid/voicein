@@ -10,31 +10,23 @@ import (
 )
 
 type Config struct {
-	Socket     string        `toml:"socket"`
-	SampleRate int           `toml:"sample_rate"`
-	Silence    time.Duration `toml:"silence"`
-	MaxRecord  time.Duration `toml:"max_record"`
-	Language   string        `toml:"language"`
-	ITN        bool          `toml:"itn"`
-	Threads    int           `toml:"threads"`
-	Notify     bool          `toml:"notify"`
-	Mode       string        `toml:"mode"`
-	Tap        time.Duration `toml:"tap"`
-	Hotkey     string        `toml:"hotkey"`
-	Model      Model         `toml:"model"`
-	Record     Record        `toml:"record"`
-	Inject     Inject        `toml:"inject"`
-	HUD        HUD           `toml:"hud"`
+	Socket       string        `toml:"socket"`
+	ScribeSocket string        `toml:"-"`
+	SampleRate   int           `toml:"sample_rate"`
+	Silence      time.Duration `toml:"silence"`
+	MaxRecord    time.Duration `toml:"max_record"`
+	Notify       bool          `toml:"notify"`
+	Mode         string        `toml:"mode"`
+	Tap          time.Duration `toml:"tap"`
+	Hotkey       string        `toml:"hotkey"`
+	Scribe       Scribe        `toml:"scribe"`
+	Record       Record        `toml:"record"`
+	Inject       Inject        `toml:"inject"`
+	HUD          HUD           `toml:"hud"`
 }
 
-type Model struct {
-	Dir     string `toml:"dir"`
-	Engine  string `toml:"engine"`
-	Onnx    string `toml:"onnx"`
-	Encoder string `toml:"encoder"`
-	Decoder string `toml:"decoder"`
-	Tokens  string `toml:"tokens"`
-	VAD     string `toml:"vad"`
+type Scribe struct {
+	Socket string `toml:"socket"`
 }
 
 type Record struct {
@@ -61,33 +53,22 @@ type HUD struct {
 }
 
 func Defaults() Config {
-	home, _ := os.UserHomeDir()
 	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
 	if runtimeDir == "" {
 		runtimeDir = filepath.Join(os.TempDir(), "voicein")
 	}
-	dataDir := os.Getenv("XDG_DATA_HOME")
-	if dataDir == "" {
-		dataDir = filepath.Join(home, ".local", "share")
-	}
 	return Config{
-		Socket:     filepath.Join(runtimeDir, "voicein.sock"),
-		SampleRate: 16000,
-		Silence:    3 * time.Second,
-		MaxRecord:  60 * time.Second,
-		Language:   "auto",
-		ITN:        true,
-		Threads:    4,
-		Notify:     true,
-		Mode:       "hybrid",
-		Tap:        300 * time.Millisecond,
-		Hotkey:     "shift+alt+v",
-		Model: Model{
-			Dir:    filepath.Join(dataDir, "voicein", "models"),
-			Engine: "sensevoice",
-			Onnx:   "model.int8.onnx",
-			Tokens: "tokens.txt",
-			VAD:    "silero_vad.onnx",
+		Socket:       filepath.Join(runtimeDir, "voicein.sock"),
+		ScribeSocket: filepath.Join(runtimeDir, "scribe.sock"),
+		SampleRate:   16000,
+		Silence:      3 * time.Second,
+		MaxRecord:    60 * time.Second,
+		Notify:       true,
+		Mode:         "hybrid",
+		Tap:          300 * time.Millisecond,
+		Hotkey:       "shift+alt+v",
+		Scribe: Scribe{
+			Socket: filepath.Join(runtimeDir, "scribe.sock"),
 		},
 		Record: Record{
 			Command: []string{"pw-record", "--rate", "16000", "--channels", "1", "--format", "s16", "--media-role", "Communication", "-"},
@@ -149,9 +130,6 @@ func Load() (Config, error) {
 	if cfg.Tap <= 0 {
 		cfg.Tap = 300 * time.Millisecond
 	}
-	if cfg.Threads <= 0 {
-		cfg.Threads = 4
-	}
 	if cfg.HUD.Width <= 0 {
 		cfg.HUD.Width = 77
 	}
@@ -164,21 +142,13 @@ func Load() (Config, error) {
 	if cfg.Socket == "" {
 		cfg.Socket = Defaults().Socket
 	}
-	if cfg.Model.Dir == "" {
-		cfg.Model.Dir = Defaults().Model.Dir
+	if cfg.Scribe.Socket != "" {
+		cfg.ScribeSocket = cfg.Scribe.Socket
+	}
+	if cfg.ScribeSocket == "" {
+		cfg.ScribeSocket = Defaults().ScribeSocket
 	}
 	return cfg, nil
-}
-
-func (c Config) EngineKind() string {
-	e := strings.ToLower(strings.TrimSpace(c.Model.Engine))
-	if e == "" {
-		if c.Model.Encoder != "" && c.Model.Decoder != "" {
-			return "whisper"
-		}
-		return "sensevoice"
-	}
-	return e
 }
 
 func (c Config) RecordMode() string {
@@ -192,61 +162,23 @@ func (c Config) RecordMode() string {
 	}
 }
 
-func (c Config) ModelOnnx() string {
-	return resolve(c.Model.Dir, c.Model.Onnx)
-}
-
-func (c Config) ModelEncoder() string {
-	return resolve(c.Model.Dir, c.Model.Encoder)
-}
-
-func (c Config) ModelDecoder() string {
-	return resolve(c.Model.Dir, c.Model.Decoder)
-}
-
-func (c Config) ModelTokens() string {
-	return resolve(c.Model.Dir, c.Model.Tokens)
-}
-
-func (c Config) ModelVAD() string {
-	return resolve(c.Model.Dir, c.Model.VAD)
-}
-
-func resolve(dir, name string) string {
-	if name == "" {
-		return ""
-	}
-	if filepath.IsAbs(name) {
-		return name
-	}
-	return filepath.Join(dir, name)
-}
-
 func Example() string {
 	return strings.TrimSpace(`
 # ~/.config/voicein/config.toml
 # Missing file uses built-in defaults.
+# Recognition lives in the scribe daemon (~/.config/scribe/config.toml).
 
 socket = ""                 # default: $XDG_RUNTIME_DIR/voicein.sock
 sample_rate = 16000
 silence = "3s"              # unused for auto-stop; keep as think-pause hint
 max_record = "60s"          # hard stop
-language = "auto"           # auto | zh | en | yue | ja | ko
-itn = true
-threads = 4
 notify = true               # mako/notify-send on failure only
 mode = "hybrid"             # hybrid | toggle | hold
 tap = "300ms"               # hybrid: shorter tap latches; hold releases
 hotkey = "shift+alt+v"      # evdev chord; empty disables daemon hotkey
 
-[model]
-dir = ""                    # default: $XDG_DATA_HOME/voicein/models
-engine = "sensevoice"       # sensevoice | whisper
-onnx = "model.int8.onnx"    # sensevoice
-encoder = ""                # whisper encoder onnx
-decoder = ""                # whisper decoder onnx
-tokens = "tokens.txt"
-vad = "silero_vad.onnx"
+[scribe]
+socket = ""                 # default: $XDG_RUNTIME_DIR/scribe.sock
 
 [record]
 command = ["pw-record", "--rate", "16000", "--channels", "1", "--format", "s16", "--media-role", "Communication", "-"]

@@ -17,19 +17,19 @@ import (
 	"github.com/zway/voicein/internal/inject"
 	"github.com/zway/voicein/internal/ipc"
 	"github.com/zway/voicein/internal/keys"
+	"github.com/zway/voicein/internal/scribe"
 	"github.com/zway/voicein/internal/wave"
 )
 
 type Daemon struct {
 	cfg      config.Config
-	engine   *asr.Engine
-	ep       *asr.Endpoint
 	hud      *hud.HUD
 	mu       sync.Mutex
 	state    ipc.State
 	err      string
 	text     string
 	started  time.Time
+	ready    time.Time
 	latched  bool
 	gen      uint64
 	cancel   context.CancelFunc
@@ -39,21 +39,7 @@ type Daemon struct {
 }
 
 func Run(cfg config.Config) error {
-	if err := os.MkdirAll(cfg.Model.Dir, 0o755); err != nil {
-		return err
-	}
-	engine, err := asr.Open(cfg)
-	if err != nil {
-		return err
-	}
-	defer engine.Close()
-	switch cfg.EngineKind() {
-	case "whisper":
-		log.Printf("engine whisper encoder=%s decoder=%s", cfg.ModelEncoder(), cfg.ModelDecoder())
-	default:
-		log.Printf("engine sensevoice model=%s", cfg.ModelOnnx())
-	}
-
+	log.Printf("scribe socket %s", cfg.ScribeSocket)
 	ln, err := ipc.Listen(cfg.Socket)
 	if err != nil {
 		return err
@@ -61,7 +47,6 @@ func Run(cfg config.Config) error {
 	defer ln.Close()
 	defer os.Remove(cfg.Socket)
 
-	ep := asr.NewEndpoint(cfg)
 	endHow := "end on second keypress"
 	switch cfg.RecordMode() {
 	case "hold":
@@ -69,20 +54,13 @@ func Run(cfg config.Config) error {
 	case "hybrid":
 		endHow = fmt.Sprintf("tap <%s latches, hold releases", cfg.Tap)
 	}
-	if ep.Live() {
-		log.Printf("vad ready %s; %s", cfg.ModelVAD(), endHow)
-	} else {
-		log.Printf("vad unavailable; energy gate fallback, %s", endHow)
-	}
+	log.Printf("energy gate; %s", endHow)
 	d := &Daemon{
-		cfg:    cfg,
-		engine: engine,
-		ep:     ep,
-		hud:    hud.Start(cfg.HUD),
-		state:  ipc.StateIdle,
-		quit:   make(chan struct{}),
+		cfg:   cfg,
+		hud:   hud.Start(cfg.HUD),
+		state: ipc.StateIdle,
+		quit:  make(chan struct{}),
 	}
-	defer d.ep.Close()
 	defer d.hud.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -96,7 +74,7 @@ func Run(cfg config.Config) error {
 	if chord, err := keys.ParseHotkey(cfg.Hotkey); err != nil {
 		log.Printf("hotkey %q: %v", cfg.Hotkey, err)
 	} else if !chord.Empty() {
-		log.Printf("hotkey %s via evdev; niri bind optional (swallow key)", cfg.Hotkey)
+		log.Printf("hotkey %s via evdev; compositor bind optional (swallow key)", cfg.Hotkey)
 		go d.listenHotkey(ctx, chord)
 	}
 	errc := make(chan error, 1)
@@ -149,13 +127,19 @@ func (d *Daemon) hotkey(down bool) {
 	st := d.state
 	latched := d.latched
 	started := d.started
+	ready := d.ready
 	mode := d.cfg.RecordMode()
 	tap := d.cfg.Tap
 	d.mu.Unlock()
 
 	held := time.Duration(0)
-	if st == ipc.StateRecording && !started.IsZero() {
-		held = time.Since(started)
+	if st == ipc.StateRecording {
+		if !ready.IsZero() {
+			held = time.Since(ready)
+		} else if !started.IsZero() {
+			// pw-record still starting: a tap must not look like a hold.
+			held = 0
+		}
 	}
 	switch keys.Classify(mode, down, st == ipc.StateRecording, latched, held, tap) {
 	case keys.ActionStart:
@@ -233,20 +217,35 @@ func (d *Daemon) startRec() (context.Context, error) {
 	d.err = ""
 	d.latched = false
 	d.started = time.Now()
+	d.ready = time.Time{}
 	d.mu.Unlock()
-
-	rec, err := audio.Start(ctx, d.cfg.Record.Command, d.cfg.SampleRate)
-	if err != nil {
-		cancel()
-		return ctx, err
-	}
-	go d.recordLoop(ctx, rec)
+	go func() {
+		if err := scribe.Warmup(context.Background(), d.cfg.ScribeSocket, d.cfg.SampleRate); err != nil {
+			log.Printf("scribe warmup: %v", err)
+		}
+	}()
+	go func() {
+		rec, err := audio.Start(ctx, d.cfg.Record.Command, d.cfg.SampleRate)
+		if err != nil {
+			d.setIdle(err.Error(), "")
+			inject.Notify(context.Background(), d.cfg, "voicein", err.Error())
+			return
+		}
+		d.mu.Lock()
+		if d.state != ipc.StateRecording {
+			d.mu.Unlock()
+			rec.Stop()
+			return
+		}
+		d.ready = time.Now()
+		d.mu.Unlock()
+		d.recordLoop(ctx, rec)
+	}()
 	return ctx, nil
 }
 
 func (d *Daemon) recordLoop(ctx context.Context, rec *audio.Recorder) {
 	defer rec.Stop()
-	d.ep.Reset()
 
 	var (
 		pcm         []float32
@@ -298,7 +297,7 @@ func (d *Daemon) recordLoop(ctx context.Context, rec *audio.Recorder) {
 			pcm = append(pcm, frame...)
 			rms := audio.RMS(frame)
 			bands = bank.Push(frame)
-			speech := rms >= speechFloor || d.ep.Push(frame)
+			speech := rms >= speechFloor
 			if speech {
 				heard = true
 				lastVoice = time.Now()
@@ -325,7 +324,10 @@ func (d *Daemon) transcribe(pcm []float32, recErr error) {
 		d.cancel()
 		d.cancel = nil
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	d.cancel = cancel
 	d.mu.Unlock()
+	defer cancel()
 
 	if recErr != nil {
 		d.finishIdle(gen, recErr.Error(), "")
@@ -337,8 +339,8 @@ func (d *Daemon) transcribe(pcm []float32, recErr error) {
 		return
 	}
 	t0 := time.Now()
-	res, err := d.engine.Decode(pcm)
-	log.Printf("decode %d samples in %s lang=%q err=%v text=%q", len(pcm), time.Since(t0), res.Language, err, res.Text)
+	text, err := scribe.Transcribe(ctx, d.cfg.ScribeSocket, d.cfg.SampleRate, pcm)
+	log.Printf("decode %d samples in %s err=%v text=%q", len(pcm), time.Since(t0), err, text)
 	d.mu.Lock()
 	stale := d.gen != gen
 	d.mu.Unlock()
@@ -346,20 +348,23 @@ func (d *Daemon) transcribe(pcm []float32, recErr error) {
 		return
 	}
 	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		d.finishIdle(gen, err.Error(), "")
 		inject.Notify(context.Background(), d.cfg, "voicein", err.Error())
 		return
 	}
-	if res.Text == "" {
+	if text == "" {
 		d.finishIdle(gen, "empty transcript", "")
 		return
 	}
-	if _, err := inject.Text(context.Background(), d.cfg, res.Text); err != nil {
-		d.finishIdle(gen, err.Error(), res.Text)
+	if _, err := inject.Text(context.Background(), d.cfg, text); err != nil {
+		d.finishIdle(gen, err.Error(), text)
 		inject.Notify(context.Background(), d.cfg, "voicein", "clipboard ok, inject failed: "+err.Error())
 		return
 	}
-	d.finishIdle(gen, "", res.Text)
+	d.finishIdle(gen, "", text)
 }
 
 func (d *Daemon) finishRec() {
@@ -398,6 +403,7 @@ func (d *Daemon) setIdle(errText, text string) {
 	}
 	d.state = ipc.StateIdle
 	d.latched = false
+	d.ready = time.Time{}
 	d.err = errText
 	if text != "" {
 		d.text = text
@@ -418,6 +424,7 @@ func (d *Daemon) finishIdle(gen uint64, errText, text string) {
 	}
 	d.state = ipc.StateIdle
 	d.latched = false
+	d.ready = time.Time{}
 	d.err = errText
 	if text != "" {
 		d.text = text

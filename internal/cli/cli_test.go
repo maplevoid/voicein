@@ -16,7 +16,10 @@ func TestHelpAndConfig(t *testing.T) {
 	if err := Run([]string{"help"}, Deps{Stdout: &buf}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(buf.String(), "toggle") || !strings.Contains(buf.String(), "hotkey") {
+	if !strings.Contains(buf.String(), "toggle") || !strings.Contains(buf.String(), "hotkey") || !strings.Contains(buf.String(), "scribe.sock") {
+		t.Fatalf("help: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "config get") || !strings.Contains(buf.String(), "config set") {
 		t.Fatalf("help: %q", buf.String())
 	}
 
@@ -24,8 +27,32 @@ func TestHelpAndConfig(t *testing.T) {
 	if err := Run([]string{"config"}, Deps{Stdout: &buf}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(buf.String(), "[hud]") {
+	if !strings.Contains(buf.String(), "[hud]") || !strings.Contains(buf.String(), "[scribe]") {
 		t.Fatalf("config: %q", buf.String())
+	}
+}
+
+func TestConfigGetSet(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	t.Setenv("VOICEIN_CONFIG", path)
+	var buf bytes.Buffer
+	if err := Run([]string{"config", "path"}, Deps{Stdout: &buf}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(buf.String()); got != path {
+		t.Fatalf("path %q", got)
+	}
+	buf.Reset()
+	if err := Run([]string{"config", "set", "hotkey", "super+v"}, Deps{Stdout: &buf}); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+	if err := Run([]string{"config", "get", "hotkey"}, Deps{Stdout: &buf}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(buf.String()); got != `"super+v"` {
+		t.Fatalf("get %q", got)
 	}
 }
 

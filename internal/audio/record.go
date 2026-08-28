@@ -14,6 +14,7 @@ import (
 // Recorder captures mono s16le PCM from cfg.Record.Command (pw-record by default).
 type Recorder struct {
 	cmd     *exec.Cmd
+	ctx     context.Context
 	cancel  context.CancelFunc
 	samples chan []float32
 	errc    chan error
@@ -38,8 +39,9 @@ func Start(ctx context.Context, argv []string, sampleRate int) (*Recorder, error
 	}
 	r := &Recorder{
 		cmd:     cmd,
+		ctx:     ctx,
 		cancel:  cancel,
-		samples: make(chan []float32, 8),
+		samples: make(chan []float32, 64),
 		errc:    make(chan error, 1),
 	}
 	go r.read(stdout, sampleRate)
@@ -86,8 +88,8 @@ func (r *Recorder) read(rc io.ReadCloser, sampleRate int) {
 		}
 		select {
 		case r.samples <- out:
-		default:
-			// Drop a frame rather than blocking the recorder if the consumer stalls.
+		case <-r.ctx.Done():
+			return
 		}
 	}
 }

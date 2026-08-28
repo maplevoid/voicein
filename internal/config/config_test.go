@@ -31,6 +31,9 @@ func TestLoadMissingUsesDefaults(t *testing.T) {
 	if cfg.Tap != 300*time.Millisecond {
 		t.Fatalf("tap %s", cfg.Tap)
 	}
+	if !stringsHasSuffix(cfg.ScribeSocket, "scribe.sock") {
+		t.Fatalf("scribe socket %q", cfg.ScribeSocket)
+	}
 }
 
 func TestLoadOverrides(t *testing.T) {
@@ -40,19 +43,14 @@ func TestLoadOverrides(t *testing.T) {
 sample_rate = 8000
 silence = "2s"
 max_record = "10s"
-language = "zh"
-itn = false
-threads = 4
 notify = false
 mode = "hold"
 tap = "150ms"
 hotkey = "super+shift+v"
 
-[model]
-engine = "whisper"
-encoder = "small-encoder.int8.onnx"
-decoder = "small-decoder.int8.onnx"
-tokens = "small-tokens.txt"
+[scribe]
+socket = "/tmp/scribe-test.sock"
+idle = "5m"
 [hud]
 enabled = false
 width = 100
@@ -73,7 +71,7 @@ x_paste = ["xdotool", "key", "ctrl+v"]
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.SampleRate != 8000 || cfg.Language != "zh" || cfg.ITN || cfg.Notify {
+	if cfg.SampleRate != 8000 || cfg.Notify {
 		t.Fatalf("unexpected cfg: %+v", cfg)
 	}
 	if cfg.RecordMode() != "hold" {
@@ -85,9 +83,8 @@ x_paste = ["xdotool", "key", "ctrl+v"]
 	if cfg.Tap != 150*time.Millisecond {
 		t.Fatalf("tap %s", cfg.Tap)
 	}
-
-	if cfg.EngineKind() != "whisper" || cfg.Model.Encoder != "small-encoder.int8.onnx" || cfg.Model.Decoder != "small-decoder.int8.onnx" {
-		t.Fatalf("model %+v", cfg.Model)
+	if cfg.ScribeSocket != "/tmp/scribe-test.sock" {
+		t.Fatalf("scribe socket %q", cfg.ScribeSocket)
 	}
 	if cfg.Silence != 2*time.Second || cfg.MaxRecord != 10*time.Second {
 		t.Fatalf("durations silence=%s max=%s", cfg.Silence, cfg.MaxRecord)
@@ -100,30 +97,6 @@ x_paste = ["xdotool", "key", "ctrl+v"]
 	}
 	if len(cfg.Inject.XPaste) != 3 || cfg.Inject.XPaste[0] != "xdotool" {
 		t.Fatalf("x_paste %+v", cfg.Inject.XPaste)
-	}
-}
-
-func TestModelPaths(t *testing.T) {
-	cfg := Defaults()
-	cfg.Model.Dir = "/models"
-	cfg.Model.Onnx = "a.onnx"
-	if got := cfg.ModelOnnx(); got != "/models/a.onnx" {
-		t.Fatal(got)
-	}
-	cfg.Model.Onnx = "/abs/model.onnx"
-	if got := cfg.ModelOnnx(); got != "/abs/model.onnx" {
-		t.Fatal(got)
-	}
-	cfg.Model.Encoder = "enc.onnx"
-	cfg.Model.Decoder = "/abs/dec.onnx"
-	if got := cfg.ModelEncoder(); got != "/models/enc.onnx" {
-		t.Fatal(got)
-	}
-	if got := cfg.ModelDecoder(); got != "/abs/dec.onnx" {
-		t.Fatal(got)
-	}
-	if Defaults().EngineKind() != "sensevoice" {
-		t.Fatalf("default engine %q", Defaults().EngineKind())
 	}
 }
 
@@ -145,4 +118,8 @@ func TestRecordMode(t *testing.T) {
 			t.Fatalf("mode %q: got %q want %q", tc.in, got, tc.want)
 		}
 	}
+}
+
+func stringsHasSuffix(s, suffix string) bool {
+	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
 }

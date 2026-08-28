@@ -1,5 +1,5 @@
 {
-  description = "voicein — Niri push-to-talk speech-to-text";
+  description = "voicein — Linux push-to-talk speech-to-text";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -81,13 +81,8 @@
               go
               gotools
               golangci-lint
-              pkg-config
-              gcc
-              stdenv.cc.cc.lib
               self.formatter.${system}
             ];
-            CGO_ENABLED = "1";
-            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ];
             # Impure: expand at shell start so nix develop / direnv work.
             shellHook = ''
               export GOPATH="''${XDG_DATA_HOME:-$HOME/.local/share}/go"

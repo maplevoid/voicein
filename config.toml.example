@@ -5,22 +5,14 @@ socket = ""                 # default: $XDG_RUNTIME_DIR/voicein.sock
 sample_rate = 16000
 silence = "3s"              # unused for auto-stop; keep as think-pause hint
 max_record = "60s"          # hard stop
-language = "auto"           # auto | zh | en | yue | ja | ko
-itn = true
-threads = 4
+# language / itn / threads / engine live in ~/.config/scribe/config.toml.
 notify = true               # notify-send/mako on failure only
 mode = "hybrid"             # hybrid | toggle | hold
 tap = "300ms"               # hybrid: shorter tap latches; hold releases
 hotkey = "shift+alt+v"      # evdev chord; empty disables daemon hotkey
 
-[model]
-dir = ""                    # default: $XDG_DATA_HOME/voicein/models
-engine = "sensevoice"       # sensevoice | whisper
-onnx = "model.int8.onnx"    # sensevoice
-encoder = "small-encoder.int8.onnx" # whisper
-decoder = "small-decoder.int8.onnx" # whisper
-tokens = "tokens.txt"       # whisper: small-tokens.txt
-vad = "silero_vad.onnx"
+[scribe]
+socket = ""                 # default: $XDG_RUNTIME_DIR/scribe.sock
 
 [record]
 command = ["pw-record", "--rate", "16000", "--channels", "1", "--format", "s16", "--media-role", "Communication", "-"]

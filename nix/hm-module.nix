@@ -12,7 +12,7 @@ let
 in
 {
   options.services.voicein = {
-    enable = lib.mkEnableOption "voicein, a Niri push-to-talk speech-to-text daemon";
+    enable = lib.mkEnableOption "voicein, a Linux push-to-talk speech-to-text daemon";
 
     package = lib.mkOption {
       type = lib.types.package;
@@ -26,13 +26,17 @@ in
     home.packages = [ cfg.package ];
 
     home.activation.ensureVoiceinModels = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      $DRY_RUN_CMD ${pkgs.coreutils}/bin/mkdir -p "$HOME/.local/share/voicein/models"
+      $DRY_RUN_CMD ${pkgs.coreutils}/bin/mkdir -p "$HOME/.local/share/scribe/models"
     '';
 
     systemd.user.services.voicein = {
       Unit = {
         Description = "voicein speech-to-text daemon";
-        After = [ "graphical-session.target" ];
+        After = [
+          "graphical-session.target"
+          "scribe.socket"
+        ];
+        Wants = [ "scribe.socket" ];
         PartOf = [ "graphical-session.target" ];
       };
       Service = {

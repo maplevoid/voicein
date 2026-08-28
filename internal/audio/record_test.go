@@ -70,6 +70,31 @@ func TestRecorderFinitePCMDoesNotPanic(t *testing.T) {
 	}
 }
 
+func TestRecorderDoesNotDropFrames(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/tone.s16"
+	const frames = 32
+	pcm := make([]byte, 320*2*frames)
+	if err := os.WriteFile(path, pcm, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	rec, err := Start(ctx, []string{"cat", path}, 16000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rec.Stop()
+	got := 0
+	for range rec.Samples() {
+		time.Sleep(5 * time.Millisecond)
+		got++
+	}
+	if got != frames {
+		t.Fatalf("got %d frames want %d", got, frames)
+	}
+}
+
 func tone(n int, freq, sr float64) []float32 {
 	out := make([]float32, n)
 	for i := range out {

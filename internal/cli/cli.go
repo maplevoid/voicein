@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/zway/voicein/internal/config"
 	"github.com/zway/voicein/internal/ipc"
@@ -51,13 +52,49 @@ func Run(args []string, d Deps) error {
 		fmt.Fprintln(d.Stdout, ipc.Format(reply.Status))
 		return nil
 	case "config":
-		fmt.Fprint(d.Stdout, config.Example())
-		return nil
+		return configCmd(d, args[1:])
 	case "help", "-h", "--help":
 		fmt.Fprint(d.Stdout, Usage())
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", cmd, Usage())
+	}
+}
+
+func configCmd(d Deps, args []string) error {
+	if len(args) == 0 {
+		fmt.Fprint(d.Stdout, config.Example())
+		return nil
+	}
+	switch args[0] {
+	case "path":
+		fmt.Fprintln(d.Stdout, config.Path())
+		return nil
+	case "get":
+		cfg, err := load(d)
+		if err != nil {
+			return err
+		}
+		if len(args) == 1 {
+			fmt.Fprint(d.Stdout, config.List(cfg))
+			return nil
+		}
+		v, err := config.Get(cfg, args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(d.Stdout, v)
+		return nil
+	case "set":
+		if len(args) < 3 {
+			return fmt.Errorf("usage: voicein config set <key> <value>")
+		}
+		return config.Set(args[1], strings.Join(args[2:], " "))
+	case "example":
+		fmt.Fprint(d.Stdout, config.Example())
+		return nil
+	default:
+		return fmt.Errorf("unknown config command %q\n\n%s", args[0], Usage())
 	}
 }
 
@@ -76,10 +113,10 @@ func call(d Deps, socket string, cmd ipc.Command) (ipc.Reply, error) {
 }
 
 func Usage() string {
-	return `voicein - push-to-talk speech-to-text for Niri
+	return `voicein - push-to-talk speech-to-text for Linux
 
 Commands:
-  daemon    stay resident, load SenseVoice, listen on the unix socket
+  daemon    stay resident, listen on the unix socket, talk to scribe
   toggle    start recording, or stop and transcribe
   down      start a hold take
   up        finish a hold take and transcribe
@@ -87,6 +124,14 @@ Commands:
   status    print idle | recording | transcribing
   quit      stop the daemon
   config    print an example config.toml
+  config path
+            print the config file path
+  config get
+            print effective keys
+  config get K
+            print one key
+  config set K V
+            write key into the toml (keeps comments)
 
 Config: $XDG_CONFIG_HOME/voicein/config.toml
   mode = "hybrid"   tap latches toggle; hold releases
@@ -94,7 +139,7 @@ Config: $XDG_CONFIG_HOME/voicein/config.toml
   mode = "hold"     hold the hotkey; release to stop
   tap = "300ms"     hybrid only: shorter tap latches
   hotkey = "shift+alt+v"  daemon reads evdev; empty disables it
-Models: $XDG_DATA_HOME/voicein/models
 Socket: $XDG_RUNTIME_DIR/voicein.sock
+scribe: $XDG_RUNTIME_DIR/scribe.sock
 `
 }

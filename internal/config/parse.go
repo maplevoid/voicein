@@ -62,20 +62,6 @@ func assign(cfg *Config, section, key, val string) error {
 				return err
 			}
 			cfg.MaxRecord = d
-		case "language":
-			cfg.Language, _ = unquote(val)
-		case "itn":
-			b, err := strconv.ParseBool(val)
-			if err != nil {
-				return err
-			}
-			cfg.ITN = b
-		case "threads":
-			n, err := strconv.Atoi(val)
-			if err != nil {
-				return err
-			}
-			cfg.Threads = n
 		case "notify":
 			b, err := strconv.ParseBool(val)
 			if err != nil {
@@ -93,23 +79,9 @@ func assign(cfg *Config, section, key, val string) error {
 			}
 			cfg.Tap = d
 		}
-	case "model":
-		s, _ := unquote(val)
-		switch key {
-		case "dir":
-			cfg.Model.Dir = s
-		case "engine":
-			cfg.Model.Engine = s
-		case "onnx":
-			cfg.Model.Onnx = s
-		case "encoder":
-			cfg.Model.Encoder = s
-		case "decoder":
-			cfg.Model.Decoder = s
-		case "tokens":
-			cfg.Model.Tokens = s
-		case "vad":
-			cfg.Model.VAD = s
+	case "scribe":
+		if key == "socket" {
+			cfg.Scribe.Socket, _ = unquote(val)
 		}
 	case "record":
 		if key == "command" {
