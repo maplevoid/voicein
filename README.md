@@ -1,242 +1,332 @@
+[English](README.md) · [中文](README.zh.md)
+
 # voicein
 
-Push-to-talk speech-to-text for Linux. The daemon owns the hotkey via
-`/dev/input/event*`. A compositor bind is only there to swallow the chord
-so `v` does not type into the focused window.
+Push-to-talk speech-to-text for Linux.
 
-Three record modes:
-
-- `hybrid` (default): press starts recording. A tap shorter than `tap`
-  (300ms) latches like toggle; hold past that threshold stops on release.
-  A later press stops a latched take.
-- `toggle`: press to start, press again (or hit 60s) to transcribe.
-- `hold`: hold; release (or hit 60s) to transcribe.
-
-Thinking pauses do not end the take.
-
-- Headless daemon. Not a TUI, not a window.
-- Default engine: [SenseVoiceSmall](https://github.com/k2-fsa/sherpa-onnx) int8 on CPU. Whisper small is optional.
-- Commands: `daemon` / `toggle` / `down` / `up` / `cancel` / `status` / `quit` / `config`.
-- Injects into the focused window. Paste failure leaves the text on the clipboard.
-- Models stay in `$XDG_DATA_HOME/voicein/models`. They are never copied into the Nix store.
-- HUD is a 77px row of 1px bars at the bottom center. Visible only while recording or transcribing.
-
-Linux only (`x86_64` / `aarch64`). Needs PipeWire (`pw-record`).
-
-`nix run` / the Home Manager module is not enough. Without models the
-daemon exits. Without group `input` it starts but the hotkey does nothing.
-
-## 1. Models
-
-Do this first. The package does not download them.
+The daemon owns the hotkey via `/dev/input/event*`. Recognition is
+[scribe](https://github.com/maplevoid/scribe). This process records,
+shows a HUD, and injects text into the focused window.
 
 ```bash
-mkdir -p ~/.local/share/voicein/models
-cd /tmp
-
-curl -L -o sensevoice.tar.bz2 \
-  https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
-tar xf sensevoice.tar.bz2
-cp sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/model.int8.onnx \
-   sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/tokens.txt \
-   ~/.local/share/voicein/models/
-
-curl -L -o ~/.local/share/voicein/models/silero_vad.onnx \
-  https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
+scribe fetch-model
+scribe serve &
+voicein daemon
 ```
 
-Required: `model.int8.onnx` + `tokens.txt`.
-`silero_vad.onnx` is HUD only; missing it still starts (energy-gate fallback).
+Hold `Shift+Alt+V` and speak. Tap (<300ms) latches; press again to
+stop. Hold past 300ms and release to stop. `voicein cancel` discards
+the take.
 
-Optional Whisper small (~360MB):
+## Requirements
+
+- Linux (`x86_64` / `aarch64`)
+- PipeWire (`pw-record`)
+- group `input` (hotkey reads `/dev/input/event*`)
+- [scribe](https://github.com/maplevoid/scribe) on the same machine
+- Wayland: `wl-copy`, `wtype` (HUD needs layer-shell)
+- X11: `xclip`, `xdotool` (no HUD)
+
+Not tied to niri or any compositor. A compositor bind is optional:
+only needed if the chord would otherwise type into the focused window.
+
+## Install
+
+### Binary
+
+Tag a `v*` release and GitHub Actions uploads:
+
+| Arch | Archive |
+| --- | --- |
+| `x86_64` | `voicein-linux-amd64.tar.gz` |
+| `aarch64` | `voicein-linux-arm64.tar.gz` |
 
 ```bash
-curl -L -o whisper.tar.bz2 \
-  https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.tar.bz2
-tar xf whisper.tar.bz2
-cp sherpa-onnx-whisper-small/small-encoder.int8.onnx \
-   sherpa-onnx-whisper-small/small-decoder.int8.onnx \
-   sherpa-onnx-whisper-small/small-tokens.txt \
-   ~/.local/share/voicein/models/
+curl -fsSL -o voicein.tar.gz \
+  https://github.com/maplevoid/voicein/releases/latest/download/voicein-linux-amd64.tar.gz
+tar -xzf voicein.tar.gz
+sudo install -m 755 voicein-linux-amd64/voicein /usr/local/bin/voicein
 ```
 
-```toml
-[model]
-engine = "whisper"
-encoder = "small-encoder.int8.onnx"
-decoder = "small-decoder.int8.onnx"
-tokens = "small-tokens.txt"
+voicein is a static Go binary. It still needs [scribe](https://github.com/maplevoid/scribe)
+on the same machine (binary or source), PipeWire, group `input`, and
+the inject tools below.
+
+### From source
+
+```bash
+# 1. scribe (transcriber) — binary or:
+git clone https://github.com/maplevoid/scribe.git
+cd scribe
+scripts/fetch-sherpa.sh x86_64-unknown-linux-gnu
+go build -o scribe ./cmd/scribe
+sudo install -m 755 scribe /usr/local/bin/scribe
+
+# 2. voicein
+git clone https://github.com/maplevoid/voicein.git
+cd voicein
+go build -mod=vendor -o voicein ./cmd/voicein
+sudo install -m 755 voicein /usr/local/bin/voicein
 ```
 
-Whisper is about 4× slower than SenseVoice.
+Packages to have on `PATH`:
 
-## 2. Group `input`
+| Distro | Packages |
+| --- | --- |
+| Debian / Ubuntu | `pipewire-bin wl-clipboard wtype xclip xdotool libnotify-bin` |
+| Fedora | `pipewire-utils wl-clipboard wtype xclip xdotool libnotify` |
+| Arch | `pipewire wl-clipboard wtype xclip xdotool libnotify` |
 
-The daemon reads `/dev/input/event*` (`crw-rw---- root input`).
-The Home Manager module does **not** add this group.
+Add yourself to group `input`, then log out and back in:
 
-```nix
-# NixOS
-users.users.<name>.extraGroups = [ "input" ];
+```bash
+sudo usermod -aG input "$USER"
+id   # must list input
 ```
 
-Then `nixos-rebuild switch` **and log out / back in**. `id` must show
-`input` before the hotkey can work. `groups` in an old terminal lies.
+On Debian/Ubuntu the device nodes are often `root:input` with mode
+`660`. On some setups they stay `root:root` `600` — then the hotkey
+will not work even after joining the group. Check:
 
-## 3. Install
+```bash
+ls -l /dev/input/event0
+```
 
-### Home Manager on NixOS
+## Run
+
+```bash
+scribe fetch-model          # SenseVoice into ~/.local/share/scribe/models
+scribe serve &              # or the systemd socket below
+voicein daemon
+voicein status              # idle
+```
+
+Without a local model, use Groq or OpenAI in scribe's config instead
+of `fetch-model`. Without `scribe serve` (or `scribe.socket`), a take
+ends with a HUD flash and no text.
+
+systemd user units, if you are not using Nix:
+
+```ini
+# ~/.config/systemd/user/scribe.socket
+[Socket]
+ListenStream=%t/scribe.sock
+SocketMode=0600
+
+[Install]
+WantedBy=sockets.target
+```
+
+```ini
+# ~/.config/systemd/user/scribe.service
+[Service]
+ExecStart=/usr/local/bin/scribe serve
+Type=simple
+```
+
+```ini
+# ~/.config/systemd/user/voicein.service
+[Unit]
+After=graphical-session.target scribe.socket
+Wants=scribe.socket
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/local/bin/voicein daemon
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now scribe.socket
+systemctl --user enable --now voicein
+```
+
+If this graphical session was already running, start the units by
+hand after enabling them.
+
+## Nix
+
+```bash
+nix run github:maplevoid/scribe -- fetch-model
+nix run github:maplevoid/voicein -- daemon
+```
+
+Home Manager (NixOS or standalone):
 
 ```nix
 {
+  inputs.scribe.url = "github:maplevoid/scribe";
+  inputs.scribe.inputs.nixpkgs.follows = "nixpkgs";
   inputs.voicein.url = "github:maplevoid/voicein";
   inputs.voicein.inputs.nixpkgs.follows = "nixpkgs";
-
-  # inside nixosSystem { modules = [ ... ]; }
-  home-manager.users.<name>.imports = [
-    inputs.voicein.homeManagerModules.default
-  ];
-  home-manager.users.<name>.services.voicein.enable = true;
 }
 ```
 
-`follows` keeps the friend on their own nixpkgs. Without it this flake
-pulls `nixos-unstable` as well.
-
-### Standalone `home.nix`
-
 ```nix
 {
-  inputs,
-  ...
-}: {
-  imports = [ inputs.voicein.homeManagerModules.default ];
+  imports = [
+    inputs.scribe.homeManagerModules.default
+    inputs.voicein.homeManagerModules.default
+  ];
+  services.scribe.enable = true;
   services.voicein.enable = true;
 }
 ```
 
-`enable` puts `voicein` on `PATH`, creates
-`~/.local/share/voicein/models`, and installs a user unit on
-`graphical-session.target`. It does not download models and does not
-add group `input`.
+On NixOS, still add group `input` yourself:
 
-The package wraps `wl-copy`, `wtype`, `xclip`, `xdotool`, and
-`notify-send`. Use the host's `pw-record`. Do not rebuild PipeWire
-from this flake.
-
-After `home-manager switch` / `nixos-rebuild switch`, if this graphical
-session was already running the unit is installed but not started:
-
-```bash
-systemctl --user daemon-reload
-systemctl --user start voicein
-voicein status   # idle
+```nix
+users.users.<name>.extraGroups = [ "input" ];
 ```
 
-A path pin (`voicein.url = "path:/…/voicein"`) needs
-`nix flake update voicein` after you pull, then rebuild. Otherwise
-the live unit keeps the old store path.
+Then rebuild **and log out**. `id` must show `input`. The Home Manager
+modules do not add the group, do not download models, and wrap
+`wl-copy` / `wtype` / `xclip` / `xdotool` / `notify-send`. They use
+the host's `pw-record`.
 
-### One-shot without Home Manager
+## Record modes
 
-Models and group `input` still required.
+- `hybrid` (default): press starts recording. A tap shorter than
+  `tap` (300ms) latches like toggle; hold past that threshold stops
+  on release. A later press stops a latched take.
+- `toggle`: press to start, press again (or hit 60s) to transcribe.
+- `hold`: hold; release (or hit 60s) to transcribe.
 
-```bash
-nix run github:maplevoid/voicein -- daemon
+Thinking pauses do not end the take. The first keypress also warms
+scribe (empty PCM). The hotkey does nothing while transcribing; use
+`cancel`.
+
+`hotkey = ""` disables evdev. `toggle` / `down` / `up` still work
+from a terminal or a compositor bind.
+
+## Optional: keep the chord out of the window
+
+The compositor does not start recording. Bind the same keys to a
+no-op if characters leak into the focused window.
+
+Hyprland:
+
+```conf
+bind = SHIFT ALT, V, exec, true
+bind = SHIFT ALT, C, exec, voicein cancel
 ```
 
-Without models this exits immediately:
-
-```text
-model ~/.local/share/voicein/models/tokens.txt: no such file or directory
-```
-
-## 4. Swallow the chord
-
-Niri (or any compositor) does not start recording. Bind the same chord
-to a no-op so the key is not typed. `cancel` is still a CLI spawn.
+niri:
 
 ```kdl
 binds {
-    Shift+Alt+V repeat=false hotkey-overlay-title="Voice input" { spawn "true"; }
-    Shift+Alt+C hotkey-overlay-title="Voice input: cancel" { spawn "voicein" "cancel"; }
+    Shift+Alt+V repeat=false { spawn "true"; }
+    Shift+Alt+C { spawn "voicein" "cancel"; }
 }
 ```
 
-`hotkey = ""` disables evdev. `toggle` / `down` / `up` still work from
-a terminal or a compositor bind.
-
-## 5. Check it
-
-```bash
-id                 # must list input
-voicein status     # idle
-journalctl --user -u voicein -e
-```
-
-A healthy start looks like:
-
-```text
-engine sensevoice model=/home/you/.local/share/voicein/models/model.int8.onnx
-vad ready .../silero_vad.onnx; tap <300ms latches, hold releases
-listening on /run/user/UID/voicein.sock
-hotkey shift+alt+v via evdev; niri bind optional (swallow key)
-hud: wayland ready 77x36 layer=overlay
-```
-
-| Symptom | Cause |
-| --- | --- |
-| `model .../tokens.txt: no such file or directory` | step 1 skipped |
-| `daemon not running (.../voicein.sock)` | unit not started in this session |
-| hotkey does nothing, journal `hotkey listen:` | not in group `input`, or no logout since adding it |
-| letter still types into the window | no swallow bind |
-| `pw-record: command not found` | PipeWire not on `PATH` |
-| HUD flashes red, no notification | decode / record failed |
-| text on clipboard, one `notify-send` | inject failed (`notify = false` silences that) |
-| `unknown command "down"` | old binary; rebuild / `nix flake update voicein` |
+Sway / i3: bind the same keys to `true` / `voicein cancel`.
 
 ## Config
 
-Optional. Missing file uses built-in defaults.
+Optional. Missing files use built-in defaults.
+
+voicein reads `~/.config/voicein/config.toml`. Engine, language, and
+idle live in `~/.config/scribe/config.toml`.
 
 ```bash
-mkdir -p ~/.config/voicein
-nix run github:maplevoid/voicein -- config > ~/.config/voicein/config.toml
+voicein config > ~/.config/voicein/config.toml
+scribe config  > ~/.config/scribe/config.toml
+voicein config set hotkey "shift+alt+v"
+scribe config set engine sensevoice
 ```
 
 ```toml
 socket = ""                 # default: $XDG_RUNTIME_DIR/voicein.sock
 sample_rate = 16000
 max_record = "60s"
-language = "auto"           # auto | zh | en | yue | ja | ko
-itn = true
-threads = 4
 notify = true
 mode = "hybrid"             # hybrid | toggle | hold
-tap = "300ms"               # hybrid: shorter tap latches; hold releases
+tap = "300ms"
 hotkey = "shift+alt+v"      # evdev; empty disables
 
-[model]
-dir = ""                    # default: $XDG_DATA_HOME/voicein/models
-engine = "sensevoice"       # sensevoice | whisper
-onnx = "model.int8.onnx"
-tokens = "tokens.txt"
-vad = "silero_vad.onnx"
+[scribe]
+socket = ""                 # default: $XDG_RUNTIME_DIR/scribe.sock
 ```
+
+## Online transcription
+
+Same daemons. In `~/.config/scribe/config.toml`:
+
+```toml
+[model]
+engine = "groq"             # or "openai"
+```
+
+```bash
+export GROQ_API_KEY=gsk_...
+# already-running user unit:
+# systemctl --user edit scribe
+# [Service]
+# Environment=GROQ_API_KEY=gsk_...
+systemctl --user restart scribe.socket
+```
+
+`openai` uses `OPENAI_API_KEY`. Either engine also accepts
+`SCRIBE_API_KEY`. Do not put keys in the toml.
 
 ## Inject
 
-Focus decides the path:
+Session type picks the tools, not the focused window:
 
-- Wayland window (`wtype`): copy, then Ctrl+V; fallback is type-from-stdin.
-- XWayland (`niri` focused PID is `xwayland-satellite`): `xclip` + `xdotool`.
+- Wayland (`wl-copy` + `wtype`): copy, then Ctrl+V; fallback is
+  type-from-stdin.
+- X11 (`xclip` + `xdotool`): `XDG_SESSION_TYPE=x11`, or `DISPLAY`
+  set and `WAYLAND_DISPLAY` empty.
 
-Text is always copied first.
+Wayland sessions with an XWayland focused window still use `wtype`.
+Text is always copied first. Paste failure leaves it on the clipboard.
+
+HUD needs a Wayland layer-shell compositor. Plain X11 can inject, with
+no bar.
+
+## Check it
+
+```bash
+id                          # must list input
+voicein status              # idle
+journalctl --user -u scribe -u voicein -e
+```
+
+A healthy start looks like:
+
+```text
+# scribe
+engine sensevoice model=/home/you/.local/share/scribe/models/model.int8.onnx
+listening on /run/user/UID/scribe.sock idle=10m0s
+
+# voicein
+scribe socket /run/user/UID/scribe.sock
+listening on /run/user/UID/voicein.sock
+hotkey shift+alt+v via evdev; compositor bind optional (swallow key)
+hud: wayland ready 77x36 layer=overlay
+```
+
+| Symptom | Cause |
+| --- | --- |
+| `model .../tokens.txt: no such file or directory` | no `scribe fetch-model` |
+| `daemon not running (.../voicein.sock)` | daemon / unit not started |
+| hotkey does nothing, journal `hotkey listen:` | not in group `input`, or no logout |
+| letter still types into the window | no compositor no-op bind |
+| `pw-record: command not found` | PipeWire not on `PATH` |
+| HUD flashes red, no notification | decode / record failed; check scribe logs |
+| text on clipboard, one `notify-send` | inject failed |
+| take ends, no text, scribe not listening | `scribe serve` / `scribe.socket` not running |
 
 ## Develop
 
 ```bash
-nix develop
 go test ./...
 go build -o voicein ./cmd/voicein
 ```
+
+Or `nix develop`.
