@@ -19,6 +19,7 @@ func TestClassify(t *testing.T) {
 	}{
 		{"hybrid idle down starts", "hybrid", true, false, false, 0, ActionStart},
 		{"hybrid short up latches", "hybrid", false, true, false, short, ActionLatch},
+		{"hybrid startup up latches", "hybrid", false, true, false, 0, ActionLatch},
 		{"hybrid long up stops", "hybrid", false, true, false, long, ActionStop},
 		{"hybrid latched up ignores", "hybrid", false, true, true, short, ActionNone},
 		{"hybrid latched down stops", "hybrid", true, true, true, 0, ActionStop},
