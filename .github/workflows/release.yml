@@ -1,0 +1,48 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Build tarballs
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for spec in amd64:voicein-linux-amd64 arm64:voicein-linux-arm64; do
+            goarch="${spec%%:*}"
+            asset="${spec##*:}"
+            mkdir -p "dist/$asset"
+            GOOS=linux GOARCH="$goarch" go build -mod=vendor -o "dist/$asset/voicein" ./cmd/voicein
+            tar -C dist -czf "dist/$asset.tar.gz" "$asset"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voicein-linux
+          path: dist/*.tar.gz
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: gh release create "$GITHUB_REF_NAME" --generate-notes dist/*.tar.gz
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
