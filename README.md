@@ -330,12 +330,17 @@ hotkey shift+alt+v via evdev; compositor bind optional (swallow key)
 hud: wayland ready 77x36 layer=overlay
 ```
 
+After a take, journal `inject type` is `wtype` on Wayland clients and
+`xdotool` on XWayland (Flatpak QQ / WeChat). `inject paste` means type
+failed and Ctrl+V ran.
+
 | Symptom | Cause |
 | --- | --- |
 | `model .../tokens.txt: no such file or directory` | no `scribe fetch-model` |
 | `daemon not running (.../voicein.sock)` | daemon / unit not started |
 | hotkey does nothing, journal `hotkey listen:` | not in group `input`, or no logout |
 | letter still types into the window | no compositor no-op bind |
+| QQ / WeChat quits on inject | `wtype` hit XWayland; journal should show `inject type` (xdotool) |
 | `pw-record: command not found` | PipeWire not on `PATH` |
 | HUD flashes red, no notification | decode / record failed; check scribe logs |
 | text on clipboard, one `notify-send` | inject failed |

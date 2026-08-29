@@ -318,12 +318,16 @@ hotkey shift+alt+v via evdev; compositor bind optional (swallow key)
 hud: wayland ready 77x36 layer=overlay
 ```
 
+说完一句后 journal 有 `inject type`：Wayland 客户端是 `wtype`，XWayland
+（Flatpak QQ / 微信）是 `xdotool`。`inject paste` 表示打字失败、走了 Ctrl+V。
+
 | 现象 | 原因 |
 | --- | --- |
 | `model .../tokens.txt: no such file or directory` | 没跑 `scribe fetch-model` |
 | `daemon not running (.../voicein.sock)` | daemon / unit 没启动 |
 | 热键没反应，journal `hotkey listen:` | 不在 `input` 组，或加组后没注销 |
 | 字母仍打进窗口 | 没有合成器空操作 bind |
+| QQ / 微信注入时退出 | `wtype` 打进了 XWayland；journal 应有 `inject type`（xdotool） |
 | `pw-record: command not found` | `PATH` 上没有 PipeWire |
 | HUD 闪红，没有通知 | 解码 / 录音失败；看 scribe 日志 |
 | 文字在剪贴板，一次 `notify-send` | 注入失败 |
