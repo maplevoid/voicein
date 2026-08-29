@@ -284,14 +284,15 @@ key 写进 toml。
 
 ## 注入
 
-会话类型决定工具，不是焦点窗口：
+会话类型决定默认工具。焦点在 XWayland 窗口时（Flatpak QQ / 微信，niri
+pid 是 `xwayland-satellite`）改走 `xclip` + `xdotool`。对这些客户端用
+`wtype` 会把 Electron 打退出。
 
-- Wayland（`wl-copy` + `wtype`）：先复制，再 Ctrl+V；失败则从 stdin 打字。
-- X11（`xclip` + `xdotool`）：`XDG_SESSION_TYPE=x11`，或设置了 `DISPLAY`
-  且没有 `WAYLAND_DISPLAY`。
+- Wayland（`wl-copy` + `wtype`）：先复制，再从 stdin 打字；失败则 Ctrl+V。
+- X11 / XWayland（`xclip` + `xdotool`）：纯 X11 会话，或焦点窗口 pid 的
+  comm 含 `xwayland`。
 
-Wayland 会话里焦点在 XWayland 窗口时仍走 `wtype`。文字一定先复制。粘贴
-失败时留在剪贴板。
+文字一定先复制。打字失败才 Ctrl+V；那一步失败时字还在剪贴板。
 
 HUD 需要 Wayland layer-shell。纯 X11 能注入，没有条。
 

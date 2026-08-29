@@ -292,15 +292,18 @@ systemctl --user restart scribe.socket
 
 ## Inject
 
-Session type picks the tools, not the focused window:
+Session type picks the default tools. A focused XWayland window
+(Flatpak QQ / WeChat via `xwayland-satellite`) switches to `xclip` +
+`xdotool` even on a Wayland session. `wtype` into those clients can
+quit Electron.
 
-- Wayland (`wl-copy` + `wtype`): copy, then Ctrl+V; fallback is
-  type-from-stdin.
-- X11 (`xclip` + `xdotool`): `XDG_SESSION_TYPE=x11`, or `DISPLAY`
-  set and `WAYLAND_DISPLAY` empty.
+- Wayland (`wl-copy` + `wtype`): copy, then type-from-stdin; fallback
+  is Ctrl+V.
+- X11 / XWayland (`xclip` + `xdotool`): native X11 session, or the
+  focused window's pid comm contains `xwayland`.
 
-Wayland sessions with an XWayland focused window still use `wtype`.
-Text is always copied first. Paste failure leaves it on the clipboard.
+Text is always copied first. Type failure falls back to Ctrl+V; that
+failure still leaves the text on the clipboard.
 
 HUD needs a Wayland layer-shell compositor. Plain X11 can inject, with
 no bar.

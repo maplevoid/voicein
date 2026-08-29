@@ -15,21 +15,22 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestTextCopiesThenPastes(t *testing.T) {
+func TestTextCopiesThenTypes(t *testing.T) {
 	dir := t.TempDir()
 	clip := filepath.Join(dir, "clip")
+	typed := filepath.Join(dir, "typed")
 	paste := filepath.Join(dir, "paste")
 	cfg := config.Defaults()
 	cfg.Inject.Timeout = time.Second
 	cfg.Inject.Copy = []string{"sh", "-c", "cat > " + clip}
+	cfg.Inject.Type = []string{"sh", "-c", "cat > " + typed}
 	cfg.Inject.Paste = []string{"sh", "-c", "echo pasted > " + paste}
-	cfg.Inject.Type = nil
 
 	res, err := Text(context.Background(), cfg, "  你好世界  ")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Copied || res.Method != "paste" {
+	if !res.Copied || res.Method != "type" {
 		t.Fatalf("result %+v", res)
 	}
 	body, err := os.ReadFile(clip)
@@ -39,33 +40,36 @@ func TestTextCopiesThenPastes(t *testing.T) {
 	if string(body) != "你好世界" {
 		t.Fatalf("clipboard %q", body)
 	}
-	if _, err := os.Stat(paste); err != nil {
+	got, err := os.ReadFile(typed)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if string(got) != "你好世界" {
+		t.Fatalf("typed %q", got)
+	}
+	if _, err := os.Stat(paste); err == nil {
+		t.Fatal("paste ran despite type succeeding")
 	}
 }
 
-func TestTextFallsBackToType(t *testing.T) {
+func TestTextFallsBackToPaste(t *testing.T) {
 	dir := t.TempDir()
-	typed := filepath.Join(dir, "typed")
+	paste := filepath.Join(dir, "paste")
 	cfg := config.Defaults()
 	cfg.Inject.Timeout = time.Second
 	cfg.Inject.Copy = []string{"sh", "-c", "cat >/dev/null"}
-	cfg.Inject.Paste = []string{"false"}
-	cfg.Inject.Type = []string{"sh", "-c", "cat > " + typed}
+	cfg.Inject.Type = []string{"false"}
+	cfg.Inject.Paste = []string{"sh", "-c", "echo pasted > " + paste}
 
 	res, err := Text(context.Background(), cfg, "abc")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Method != "type" {
+	if res.Method != "paste" {
 		t.Fatalf("method %s", res.Method)
 	}
-	body, err := os.ReadFile(typed)
-	if err != nil {
+	if _, err := os.Stat(paste); err != nil {
 		t.Fatal(err)
-	}
-	if string(body) != "abc" {
-		t.Fatalf("typed %q", body)
 	}
 }
 
@@ -94,15 +98,15 @@ func TestTextDoesNotWaitOnClipboardOwner(t *testing.T) {
 func TestTextUsesX11CommandsWhenFocusedX11(t *testing.T) {
 	dir := t.TempDir()
 	clip := filepath.Join(dir, "clip")
-	paste := filepath.Join(dir, "paste")
+	typed := filepath.Join(dir, "typed")
 	cfg := config.Defaults()
 	cfg.Inject.Timeout = time.Second
 	cfg.Inject.Copy = []string{"false"}
 	cfg.Inject.Paste = []string{"false"}
-	cfg.Inject.Type = nil
+	cfg.Inject.Type = []string{"false"}
 	cfg.Inject.XCopy = []string{"sh", "-c", "cat > " + clip}
-	cfg.Inject.XPaste = []string{"sh", "-c", "echo pasted > " + paste}
-	cfg.Inject.XType = nil
+	cfg.Inject.XPaste = []string{"false"}
+	cfg.Inject.XType = []string{"sh", "-c", "cat > " + typed}
 	lookupX11 = func() bool { return true }
 	t.Cleanup(func() {
 		lookupX11 = func() bool { return false }
@@ -112,7 +116,7 @@ func TestTextUsesX11CommandsWhenFocusedX11(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Method != "paste" {
+	if res.Method != "type" {
 		t.Fatalf("method %s", res.Method)
 	}
 	body, err := os.ReadFile(clip)
@@ -121,6 +125,47 @@ func TestTextUsesX11CommandsWhenFocusedX11(t *testing.T) {
 	}
 	if string(body) != "qq" {
 		t.Fatalf("clipboard %q", body)
+	}
+	got, err := os.ReadFile(typed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "qq" {
+		t.Fatalf("typed %q", got)
+	}
+}
+
+func TestFocusedX11MatchesSatelliteComm(t *testing.T) {
+	t.Setenv("XDG_SESSION_TYPE", "wayland")
+	t.Setenv("DISPLAY", ":0")
+	t.Setenv("WAYLAND_DISPLAY", "wayland-1")
+	lookupX11 = nil
+	lookupPID = func() (int, bool) { return 2517, true }
+	readComm = func(int) (string, error) { return ".xwayland-satel\n", nil }
+	t.Cleanup(func() {
+		lookupX11 = func() bool { return false }
+		lookupPID = nil
+		readComm = nil
+	})
+	if !focusedX11() {
+		t.Fatal("expected xwayland-satellite comm to route X11")
+	}
+}
+
+func TestFocusedX11IgnoresWaylandClient(t *testing.T) {
+	t.Setenv("XDG_SESSION_TYPE", "wayland")
+	t.Setenv("DISPLAY", ":0")
+	t.Setenv("WAYLAND_DISPLAY", "wayland-1")
+	lookupX11 = nil
+	lookupPID = func() (int, bool) { return 3423, true }
+	readComm = func(int) (string, error) { return "ghostty\n", nil }
+	t.Cleanup(func() {
+		lookupX11 = func() bool { return false }
+		lookupPID = nil
+		readComm = nil
+	})
+	if focusedX11() {
+		t.Fatal("wayland client must keep wtype")
 	}
 }
 

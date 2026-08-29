@@ -359,11 +359,13 @@ func (d *Daemon) transcribe(pcm []float32, recErr error) {
 		d.finishIdle(gen, "empty transcript", "")
 		return
 	}
-	if _, err := inject.Text(context.Background(), d.cfg, text); err != nil {
+	res, err := inject.Text(context.Background(), d.cfg, text)
+	if err != nil {
 		d.finishIdle(gen, err.Error(), text)
 		inject.Notify(context.Background(), d.cfg, "voicein", "clipboard ok, inject failed: "+err.Error())
 		return
 	}
+	log.Printf("inject %s", res.Method)
 	d.finishIdle(gen, "", text)
 }
 

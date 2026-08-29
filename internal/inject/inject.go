@@ -3,10 +3,12 @@ package inject
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,21 +36,21 @@ func Text(ctx context.Context, cfg config.Config, text string) (Result, error) {
 	}
 	res := Result{Copied: true, Method: "clipboard"}
 
-	if len(pasteCmd) > 0 {
-		pctx, cancel := context.WithTimeout(ctx, timeout)
-		err := run(pctx, pasteCmd)
-		cancel()
-		if err == nil {
-			res.Method = "paste"
-			return res, nil
-		}
-	}
 	if len(typeCmd) > 0 {
 		tctx, cancel := context.WithTimeout(ctx, timeout)
 		err := runStdin(tctx, typeCmd, text)
 		cancel()
 		if err == nil {
 			res.Method = "type"
+			return res, nil
+		}
+	}
+	if len(pasteCmd) > 0 {
+		pctx, cancel := context.WithTimeout(ctx, timeout)
+		err := run(pctx, pasteCmd)
+		cancel()
+		if err == nil {
+			res.Method = "paste"
 			return res, nil
 		}
 	}
@@ -62,13 +64,39 @@ func route(inj config.Inject) (copyCmd, pasteCmd, typeCmd []string) {
 	return inj.Copy, inj.Paste, inj.Type
 }
 
-var lookupX11 func() bool
+type focusedWindow struct {
+	PID int `json:"pid"`
+}
+
+var (
+	lookupX11  func() bool
+	lookupPID  func() (int, bool)
+	readComm   func(int) (string, error)
+	pidLookups = [][]string{
+		{"niri", "msg", "-j", "focused-window"},
+		{"hyprctl", "activewindow", "-j"},
+	}
+)
 
 func focusedX11() bool {
 	if lookupX11 != nil {
 		return lookupX11()
 	}
-	return sessionIsX11()
+	if sessionIsX11() {
+		return true
+	}
+	if os.Getenv("DISPLAY") == "" {
+		return false
+	}
+	pid, ok := focusedPID()
+	if !ok || pid <= 0 {
+		return false
+	}
+	name, err := commOf(pid)
+	if err != nil {
+		return false
+	}
+	return isXwayland(name)
 }
 
 func sessionIsX11() bool {
@@ -79,6 +107,48 @@ func sessionIsX11() bool {
 		return false
 	}
 	return os.Getenv("DISPLAY") != "" && os.Getenv("WAYLAND_DISPLAY") == ""
+}
+
+func focusedPID() (int, bool) {
+	if lookupPID != nil {
+		return lookupPID()
+	}
+	for _, argv := range pidLookups {
+		if _, err := exec.LookPath(argv[0]); err != nil {
+			continue
+		}
+		out, err := exec.Command(argv[0], argv[1:]...).Output()
+		if err != nil {
+			continue
+		}
+		if pid, ok := parseFocusedPID(out); ok {
+			return pid, true
+		}
+	}
+	return 0, false
+}
+
+func parseFocusedPID(out []byte) (int, bool) {
+	var win focusedWindow
+	if err := json.Unmarshal(out, &win); err == nil && win.PID > 0 {
+		return win.PID, true
+	}
+	return 0, false
+}
+
+func commOf(pid int) (string, error) {
+	if readComm != nil {
+		return readComm(pid)
+	}
+	name, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/comm")
+	if err != nil {
+		return "", err
+	}
+	return string(name), nil
+}
+
+func isXwayland(name string) bool {
+	return strings.Contains(strings.ToLower(name), "xwayland")
 }
 
 func Notify(ctx context.Context, cfg config.Config, title, body string) {
