@@ -199,7 +199,12 @@ bind 调用。
 
 ## 可选：别让组合键打进窗口
 
-合成器不会开始录音。如果字符会漏进当前窗口，把同样的键绑到空操作。
+合成器不会开始录音。daemon 读 evdev，没有 `EVIOCGRAB`，所以未绑定的
+`Shift+Alt+V` 仍会进当前窗口（Ghostty / 终端常常当成粘贴）。把同样的
+键绑到空操作才能吞掉。
+
+不要把 V 绑成 `voicein toggle`：evdev 已经 latch，合成器再 spawn 会打
+两次。C 要绑 `voicein cancel`；daemon 没有 evdev 取消键。
 
 Hyprland：
 
@@ -208,12 +213,22 @@ bind = SHIFT ALT, V, exec, true
 bind = SHIFT ALT, C, exec, voicein cancel
 ```
 
-niri：
+niri（默认 `mod-key` Super）：
 
 ```kdl
 binds {
     Shift+Alt+V repeat=false { spawn "true"; }
     Shift+Alt+C { spawn "voicein" "cancel"; }
+}
+```
+
+若 `mod-key "Alt"`，物理 `Shift+Alt+V` / `Shift+Alt+C` 是
+`Mod+Shift+V` / `Mod+Shift+C`。写 `Mod+`，不要写 `Shift+Alt+`：
+
+```kdl
+binds {
+    Mod+Shift+V repeat=false { spawn "true"; }
+    Mod+Shift+C { spawn "voicein" "cancel"; }
 }
 ```
 

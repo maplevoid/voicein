@@ -205,8 +205,14 @@ from a terminal or a compositor bind.
 
 ## Optional: keep the chord out of the window
 
-The compositor does not start recording. Bind the same keys to a
-no-op if characters leak into the focused window.
+The compositor does not start recording. The daemon reads the chord
+from evdev with no `EVIOCGRAB`, so an unbound `Shift+Alt+V` still
+reaches the focused window (Ghostty / terminals often paste). Bind the
+same keys to a no-op to swallow them.
+
+Do not bind V to `voicein toggle`: evdev already latches, and a
+compositor spawn would fire twice. Bind C to `voicein cancel`; the
+daemon has no evdev cancel chord.
 
 Hyprland:
 
@@ -215,12 +221,22 @@ bind = SHIFT ALT, V, exec, true
 bind = SHIFT ALT, C, exec, voicein cancel
 ```
 
-niri:
+niri (default `mod-key` Super):
 
 ```kdl
 binds {
     Shift+Alt+V repeat=false { spawn "true"; }
     Shift+Alt+C { spawn "voicein" "cancel"; }
+}
+```
+
+If `mod-key "Alt"`, physical `Shift+Alt+V` / `Shift+Alt+C` are
+`Mod+Shift+V` / `Mod+Shift+C`. Write `Mod+`, not `Shift+Alt+`:
+
+```kdl
+binds {
+    Mod+Shift+V repeat=false { spawn "true"; }
+    Mod+Shift+C { spawn "voicein" "cancel"; }
 }
 ```
 
